@@ -547,12 +547,22 @@ From a `.3mf` project, the system must be able to extract:
 - The filament settings recorded in the project, including material type and temperatures.
 - The printer settings recorded in the project, including nozzle diameter and build volume.
 - Which of those settings differ from the preset they derive from, since a modified setting is
-  far more interesting than a default one.
+  far more interesting than a default one. An OrcaSlicer project does not record this set, and it
+  names its presets without embedding them, so producing the set needs the external preset library
+  as a baseline. Ingesting that library is future work ([§14](#14-future-work)); until then the
+  system serves the resolved settings and the preset names.
 - Per-object and per-modifier overrides, and object placement on the plate.
 - Plate and model metadata, including object names and counts.
 - The embedded preview thumbnails, and the plate layout in a form that can be shown to the user
   and compared against a photograph of the finished plate ([§5.7](#57-diagnosis)). Knowing
   which object on the plate a defect belongs to depends on this.
+- **The intended geometry of each object — what it was supposed to look like.** The project
+  contains the 3D model, and diagnosis depends on comparing that intended shape against a
+  photograph of what actually printed: a layer shift, a missing feature, or a sagged overhang is
+  a departure from the model, invisible in settings and G-code alone. The system must be able to
+  present the intended geometry as rendered views from useful angles, and to report an object's
+  measurements — bounding box, height, footprint, volume, overhang extents. The geometry must be
+  exposed through these bounded views, never fed to the model wholesale.
 
 From a G-code file, the system must be able to extract:
 
@@ -625,8 +635,10 @@ documents.
   provider. Anything provider-specific must sit behind a boundary that another provider's
   equivalent can be substituted into.
 - All deployment-varying configuration — where the knowledge-base document is, where artifacts
-  are stored, which identity provider to use, which printers exist — must come from the
-  environment, not from code.
+  are stored, which identity provider to use, which printers exist — must be supplied externally
+  per deployment, not baked into code. The mechanism (a configuration file for non-secret
+  settings, the environment for secrets) is an architecture concern; the requirement here is only
+  that a deployment can set these without a code change.
 - Running locally must require no cloud account, no cloud credentials, and no external
   infrastructure beyond the model API and the transcription service. In particular it must
   require no identity provider, since local mode is unauthenticated
@@ -771,6 +783,10 @@ Deferred deliberately, in rough order of expected value:
   opens an outbound connection to the server, which proxies Moonraker and webcam requests
   through it. This makes every live feature work from a cloud deployment without inbound ports.
 - **Session deletion**, including purging the session's artifacts from storage.
+- **A manual "update now" control for the printer knowledge-base document.** The system detects
+  changes to the document by polling on an interval, so a just-made edit can take up to that
+  interval to be picked up. A button that forces an immediate re-ingest would remove the wait
+  after a deliberate edit, rather than relying on the poll to notice.
 - **System ownership of the printer definition file.** In this version the document belongs to
   the user: the system reads it and never writes to it, and suggested updates are handed back
   as text for the user to apply. In a later version the system takes ownership of the file —
@@ -779,6 +795,10 @@ Deferred deliberately, in rough order of expected value:
   into the document. This requires deciding how the system's writes coexist with the user's own
   hand edits to the same file, and whether the document remains the source of truth or becomes
   an export of state the system holds internally.
+- **A firmware-restart control after emergency stop.** An emergency stop issues `M112`, leaving
+  the printer in a Klipper shutdown that a `FIRMWARE_RESTART` clears. The MVP leaves that recovery
+  to Mainsail; this would offer a one-tap restart in the system's own UI, so the person who stopped
+  the printer here can recover it here rather than switching to another interface.
 - **Moonraker authentication** — API keys, user accounts, and trusted-client configuration, for
   printers that do not allow unauthenticated access from the LAN. This becomes considerably
   more pressing alongside the relay agent above, since a printer exposed to a remote server is
@@ -794,6 +814,26 @@ Deferred deliberately, in rough order of expected value:
   browser supports it.
 - **Multiple isolated users**, each with their own printers, sessions, and artifacts, replacing
   the current many-identities-to-one-user model.
+- **Multi-plate project support.** An OrcaSlicer project can hold several plates, each with its
+  own objects, layout, and sliced G-code. The MVP treats a project as a single plate; this would
+  index every plate and associate each with its own G-code, so a session can concern any plate in
+  a multi-plate project.
+- **Per-layer intended cross-section.** The MVP presents intended geometry as whole-object rendered
+  views. This would slice the model at a given height to show the intended outline at a specific
+  layer, so a defect at a layer can be compared against the exact intended shape there rather than
+  against the toolpath, which only approximates it.
+- **Project and G-code slice-consistency detection.** The MVP trusts that an uploaded G-code was
+  sliced from the uploaded project. This would compare the G-code's embedded configuration block
+  against the project's settings and flag a mismatch, catching the case where the two are from
+  different slices — analysing a mismatched pair diagnoses the wrong artifacts, the same failure
+  class as the printer mismatch already detected ([§5.2](#52-session-lifecycle)).
+- **Modified-from-preset diff via the OrcaSlicer preset library.** An OrcaSlicer `.3mf` records
+  fully-resolved settings and names its presets, but does not record which settings were
+  overridden, and the presets themselves are not embedded. The MVP serves the resolved settings
+  and the preset names ([§7](#7-large-file-access-requirements)). This would ingest the user's
+  OrcaSlicer preset library, resolve each named preset, and diff against it to produce the
+  high-signal modified-from-preset set, degrading to resolved-values-only when the library is
+  unavailable (as in a cloud deployment).
 - **Support for other slicers** — PrusaSlicer, Bambu Studio, Cura — and their project and
   G-code formats. The MVP assumes OrcaSlicer's `.3mf` layout and G-code flavour.
 - **Support for other printer firmware** — Marlin, RepRap, Bambu, Prusa — behind the same
@@ -801,6 +841,12 @@ Deferred deliberately, in rough order of expected value:
 - **Video and timelapse analysis**, for defects that only manifest in motion.
 - **System-owned filament profiles**, tracking calibration results per material and exporting
   slicer-importable profile files.
+- **Procedures as on-demand skills.** The MVP places all six procedure documents in full in the
+  cached system-prompt prefix, paying their cost once and amortising it across sessions. As the
+  catalog grows, that fixed prefix cost grows with it; turning each procedure into a skill the
+  agent loads only when it is relevant would keep the prompt small, at the cost of a less cacheable
+  prefix. Worth doing once the catalog is large enough that carrying every procedure on every
+  session is no longer negligible.
 - **An expanded procedure catalog**, and automatic application of recommended setting changes
   back into slicer profiles.
 

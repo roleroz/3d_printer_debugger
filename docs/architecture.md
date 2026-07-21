@@ -164,7 +164,7 @@ the rest of the process holds, and a subprocess boundary would mean serializing 
 
 | Server | Exposes | Backed by |
 | --- | --- | --- |
-| `project` | Slicer settings, per-object overrides, plate layout, thumbnails | `.3mf` index |
+| `project` | Settings, overrides, layout, thumbnails, geometry renders | `.3mf` index + mesh |
 | `gcode` | Layer/coordinate lookup, feature and state queries, anomalies | G-code index |
 | `printer` | Live state, config, logs, webcam still; proposed writes | Moonraker client |
 
@@ -175,13 +175,16 @@ exceed it.
 
 Run once when a file is ingested, producing a compact index stored alongside the artifact.
 
-- **`.3mf`** — a zip of XML and JSON. Parsed fully at ingest; the result is small enough to hold.
+- **`.3mf`** — a zip of XML, JSON, and mesh. Settings, metadata, and thumbnails are parsed at
+  ingest into a small index; the mesh is retained in the stored artifact and rendered to
+  intended-geometry views on demand, never loaded into the index.
 - **G-code** — hundreds of megabytes, and the interesting queries are positional. The indexer
   makes a single pass, recording layer boundaries with their byte offsets and Z heights,
   per-layer feature and extrusion summaries, XY bounding boxes per object and per layer, and
-  **periodic machine-state checkpoints** so cumulative state (temperatures, fan, acceleration,
-  pressure advance, extrusion mode) at an arbitrary point can be reconstructed by replaying from
-  the nearest checkpoint rather than from the start of the file.
+  **a full machine-state snapshot at the start of every layer** so cumulative state (temperatures,
+  fan, acceleration, pressure advance, extrusion mode) at an arbitrary point can be reconstructed by
+  replaying from the snapshot at the start of the containing layer rather than from the start of
+  the file.
 
 The index is what makes [§7](spec.md#7-large-file-access-requirements) affordable: queries
 are offset lookups plus a bounded re-read, never a full scan.
@@ -325,7 +328,7 @@ Combines the four routes from [§5.7](spec.md#57-diagnosis) of the spec against 
 - A photo matched against the plate image resolves to an object and an XY region, which the
   index's per-object bounding boxes turn into candidate line ranges.
 - Conversational narrowing queries feature transitions and layer anomalies to propose candidates.
-- Machine state at the located point is reconstructed from the nearest checkpoint.
+- Machine state at the located point is reconstructed from the snapshot at its layer's start.
 
 The model composes these; the tools supply bounded answers and the state reconstruction.
 
@@ -433,15 +436,55 @@ One container image holding the application, its MCP servers, and the Whisper we
 
 - **Local** — `docker compose up`; SQLite and artifacts on a mounted volume; local mode; no cloud
   account, no identity provider.
-- **GCP** — the same image on Cloud Run, artifacts in Cloud Storage, exposed mode with OIDC.
-  Cloud Run has no persistent local disk, so the SQLite file needs a mounted volume; which
-  mechanism (a network filesystem mount versus a managed database behind the same store
-  interface) is an open question for the storage module's design.
+- **GCP** — the same image on a Compute Engine VM with a persistent disk, artifacts in Cloud
+  Storage, exposed mode with OIDC. Not Cloud Run: a request-scoped autoscaler is the wrong shape
+  for this system. Its request timeout caps SSE streams and blocked approval waits, scale-to-zero
+  discards the in-memory agent clients a live session depends on, more than one instance breaks
+  the single-writer discipline SQLite relies on, and it has no persistent local disk. A small
+  always-on VM costs more than scale-to-zero and removes all four problems
+  ([design/store.md](design/store.md)).
 - **Other providers** — any container host. Only the artifact backend and the volume are
   provider-shaped, and both sit behind interfaces.
 
-All configuration comes from the environment. Dependencies — Python packages, base image, Whisper
-model — are pinned to specific versions; no moving tags.
+Dependencies — Python packages, base image, Whisper model — are pinned to specific versions; no
+moving tags.
+
+### 9.1 Configuration
+
+Configuration is supplied two ways, split by nature, and this is the single authoritative
+description of the mechanism — the design documents that call a value "configurable" mean a key
+here.
+
+- **A YAML configuration file holds all non-secret settings.** Its path comes from one bootstrap
+  environment variable with a sensible default. It is not committed to the repository. Nested and
+  structured settings — the artifact backend and its parameters, the OIDC block, the upload
+  limits — live here because they read naturally as structure and badly as flat variables.
+- **Secrets come only from the environment** — the model API key, and in exposed mode the OIDC
+  client secret. Never from the file, never from the repository, never in logs
+  ([§11](#11-security)). A cloud secret manager satisfies this by populating the environment.
+- **Defaults live in code.** The file overrides them; anything unset uses the default. A minimal
+  file — or none, in a fully-defaulted local run — is valid.
+- **Everything is validated at startup**, and the process refuses to serve on anything missing or
+  contradictory: an unset or inconsistent mode, exposed mode without an identity provider, a
+  configuration path that does not resolve, an artifact backend without its parameters. This is
+  the same fail-fast rule the mode already follows ([§11](#11-security)), generalised to all
+  configuration.
+
+The configuration surface, by nature:
+
+- **Secrets — environment only.** The model API key, and in exposed mode the OIDC client secret.
+- **Deployment wiring — file.** Mode; bind address; the artifact backend and its parameters; the
+  store, KB-document, and config-file-base paths; and the OIDC issuer, client id, and subject
+  allowlist.
+- **Tunables — file, defaulted in code.** KB poll interval; upload size limits; approval timeout;
+  voice-message cap; model and effort; `busy_timeout`.
+
+The **config-file base** deserves its own note, because it is what resolves the open question the
+knowledge-base document raised: the user's Klipper configuration paths are written with a `~` that
+means nothing inside a container. The deployment mounts the user's configuration tree at a known
+location and sets that location as the config-file base; the ingester resolves each path against
+it rather than expanding `~`
+([design/kb_ingestion.md §3.4](design/kb_ingestion.md#34-completeness-and-missing-values)).
 
 ## 10. Observability
 
@@ -480,6 +523,7 @@ model — are pinned to specific versions; no moving tags.
 | Structured store | SQLite (WAL) | One file, no service, identical locally and in a container |
 | Artifacts | Filesystem or object storage behind one interface | The provider-substitutable seam |
 | `.3mf` parsing | Standard-library zip + XML/JSON | A zip of XML and JSON; no dependency needed |
+| Mesh rendering | Headless mesh renderer | Renders intended geometry to compare against a photo |
 | G-code indexing | Purpose-written | The queries are positional and specific; no library fits |
 | Printer | Moonraker HTTP + WebSocket | The Klipper interface |
 | Transcription | Local Whisper | No external account; audio stays local |
@@ -492,12 +536,11 @@ model — are pinned to specific versions; no moving tags.
   implementation time.
 - The MCP tool signatures and parameters. [§7](spec.md#7-large-file-access-requirements) of the spec
   states what must be extractable; the tool surface is the MCP module's design.
-- The G-code index's on-disk format and checkpoint interval.
+- The G-code index's on-disk format.
 - The procedure catalog's contents. Each procedure's preconditions, steps, and interpretation
   belong in the procedures module's design.
 - Prompt content and structure, beyond the requirement that it be stable-prefix-first for caching.
 - HTML, CSS, and the visual design of the interface.
-- The Cloud Run persistence mechanism for SQLite ([§9](#9-deployment)).
 
 ## 14. Module design documents to follow
 
