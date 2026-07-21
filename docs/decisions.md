@@ -248,3 +248,98 @@ not displayed continuously. No spending limit is enforced.
 afterwards — but a running total is noise on a phone screen mid-diagnosis. A hard cap on a
 single-user system running against the user's own API key would mainly serve to stop a session
 working mid-problem.
+
+## 2026-07-20 — Architecture decisions
+
+### Agent layer
+
+**Decision:** The Claude Agent SDK (`claude-agent-sdk`, Python), used through its persistent
+client, one client per active session. All of its built-in tools — shell, file read/write/edit,
+search, web access — are disabled.
+
+**Why:** The SDK supplies the agent loop, context management, session persistence and resume,
+streaming, image input, MCP hosting, and a permission system, which is most of what this system
+needs. Its built-in tools serve none of the requirements here and would put shell and filesystem
+access on a host sitting next to machines with 60W heaters, so they are disabled through four
+independent mechanisms: a tool allowlist naming only our tools, an explicit disallow of the
+built-in set, a permission mode that denies anything unlisted, and the approval callback.
+
+The alternative considered was the Claude API tool runner over hand-defined tools, which has no
+built-in tool surface to disable. The Agent SDK was chosen for the session and context machinery
+it brings.
+
+### Approval gate
+
+**Decision:** The confirmation requirement for printer writes is implemented as the SDK's
+permission callback, which blocks the turn until the user decides in the browser.
+
+**Why:** The gate sits below the model rather than beside it. No prompt content can route around
+a callback the SDK invokes before executing a tool, which is the property this requirement needs.
+Dangerous-action classification is a static check on the pending command in the same callback,
+independent of what the model believes about it.
+
+### MCP servers in-process
+
+**Decision:** The three capability servers (`project`, `gcode`, `printer`) run in-process via the
+SDK's in-process MCP mechanism, not as stdio subprocesses.
+
+**Why:** They need the same artifact store, printer connections, and parsed-file indexes the rest
+of the process holds. A subprocess boundary would mean serializing all of it across a pipe for no
+isolation benefit — the isolation that matters is the capability surface, which the allowlist
+already provides.
+
+### Web interface
+
+**Decision:** Server-rendered HTML with hand-written JavaScript only where browser APIs require
+it (camera capture, audio recording, upload progress, SSE). Assistant output streams over
+Server-Sent Events.
+
+**Why:** No build step, no bundler, one deployable artifact. SSE is unidirectional and reconnects
+natively, which matches the traffic shape — bulk output down, occasional small messages up.
+
+### Structured storage
+
+**Decision:** SQLite in WAL mode, accessed through a single writer. Artifacts sit behind a
+separate blob interface: local filesystem locally, object storage in a cloud deployment.
+
+**Why:** One file, no service to run, identical locally and in a container, trivially backed up.
+A single user's concurrency does not justify a database service, and the single-writer discipline
+avoids a class of write-lock bugs entirely. The artifact interface is the seam that keeps the
+system provider-agnostic.
+
+### Transcription
+
+**Decision:** Local Whisper running in the container, weights baked into the image and pinned.
+
+**Why:** Speech-to-text is not an Anthropic API, so this is a genuinely separate dependency. A
+hosted provider would add a second AI vendor, a second API key, send workshop audio to another
+provider, and break the requirement that a local deployment need no cloud account. The cost is
+CPU and image size.
+
+### Packaging
+
+**Decision:** A single container image containing the application, its MCP servers, and the
+Whisper weights. `docker compose` locally, the same image on Cloud Run for GCP.
+
+**Why:** The same artifact runs everywhere, satisfying the requirement that local and cloud
+deployments be the same build. Only the artifact backend and the storage volume are
+provider-shaped, and both sit behind interfaces.
+
+### Web access for the agent
+
+**Decision:** Web search and web fetch are enabled, unrestricted. The Agent SDK's host-touching
+built-ins — shell, file read/write/edit, filesystem search — stay disabled. Web-derived claims
+must be cited and are explicitly ranked below first-hand evidence from the artifacts,
+configuration, and live printer state.
+
+**Why:** An earlier version of the architecture disabled every built-in tool on a single "deny by
+default" argument. That conflated two different risk classes. Shell and filesystem access let the
+model act on a host sitting on the printer network; web search and fetch read remote content and
+never touch the host. Denying the web tools bought no host safety and cost real capability — the
+firmware error strings, hardware quirks, and community fixes this domain runs on are not all in
+the model's training data, and the hardware moves faster than any training cutoff.
+
+The residual risk is prompt injection from a fetched page. That is contained structurally rather
+than by prompting: the web tools cannot reach the printer, and every printer write stops at the
+approval gate with the exact command displayed to a human. The citation-and-ranking rule addresses
+the separate failure of a confident forum post outweighing what the G-code plainly shows.

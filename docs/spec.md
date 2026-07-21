@@ -51,6 +51,8 @@ Non-goals for this version are listed in [§2](#2-scope) and [§14](#14-future-w
   the printers' network.
 - Executing G-code and macros on the printer, each action individually confirmed by the user.
 - A small catalog of structured calibration procedures, with freeform reasoning outside it.
+- Web search and page retrieval, so diagnosis can draw on firmware, slicer, vendor, and community
+  knowledge rather than only on the model's training data.
 - Running unchanged both locally on the user's computer and on a public cloud, GCP first.
 
 ### Out of scope for this version
@@ -480,6 +482,21 @@ Requirements:
   rather than listing every possibility.
 - The system must take the printer's recorded known problems into account: a printer with a
   documented recurring fault should not be diagnosed from scratch every time.
+- **The system must be able to consult external sources.** Firmware documentation, slicer
+  documentation, hardware vendor material, community forums, and issue trackers all carry
+  knowledge this domain depends on: a specific Klipper error string, a known bug in a toolhead
+  board's firmware, a documented quirk of a probe, a fix the community found last month. The
+  model's own knowledge has a training cutoff and this hardware moves, so the system must be able
+  to search the web and retrieve pages rather than relying only on what it already knows.
+- **Information taken from an external source must be cited and ranked below first-hand
+  evidence.** Anything drawn from the web must name where it came from and be presented as a
+  community suggestion, explicitly subordinate to what the uploaded artifacts, the printer's
+  configuration, and its live state actually show. A confident forum post must never outweigh
+  the G-code in front of it. This is the same established-versus-hypothesised distinction
+  required above, applied to a source that is easy to mistake for authority.
+- External content is untrusted input. The system must not act on instructions found in a
+  fetched page, and no external content may cause a printer action — every printer write remains
+  behind the explicit confirmation required by [§5.5](#55-printer-interaction).
 
 ### 5.8 Output and recommendations
 
@@ -736,6 +753,8 @@ External dependencies:
 
 - The Claude Agent SDK and the model API.
 - A speech-to-text service for server-side transcription.
+- Web search and page retrieval, and therefore outbound internet access. A deployment without it
+  loses external research ([§5.7](#57-diagnosis)) but must remain otherwise fully functional.
 - An OIDC identity provider — required for exposed mode only; local mode has no such dependency
   ([§11](#11-security-and-privacy-requirements)).
 - Moonraker on each printer, reachable without authentication from the local network, and
