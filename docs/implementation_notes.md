@@ -73,6 +73,20 @@ design. It is maintained across the module commits on the `feature/implementatio
   timeout-as-denial, crash-recovery-to-denial, no-bypass). This is the load-bearing security
   component and it is green.
 
+- **[web] The backend routes, security, SSE fan-out, and startup are implemented and tested; the
+  HTML/JS presentation layer is not.** The FastAPI app exposes JSON routes with the auth + CSRF
+  middleware (the cross-site-POST-to-approvals refusal is tested), SSE fan-out with
+  position-based reconnect, upload Content-Length pre-check, the emergency-stop route, and startup
+  URL printing. **Not implemented (deferred):** server-rendered HTML pages (T4.1/T4.2), the client
+  JavaScript for camera/mic/upload-progress/SSE-consumer and the approval refusal UI where Enter
+  must not approve (T4.3, T5.1 UI half), audio recording + Whisper transcription (T7.1), true
+  streamed uploads to the artifact store (T6.1 does the size pre-check only), and artifact serving
+  (T4.4). The OIDC integration is represented by an `X-Auth-Subject` seam; a real OIDC middleware
+  validates and sets it.
+- **[web] Local Whisper transcription is not implemented.** `faster-whisper` was chosen but audio
+  capture/transcription (T7.1) is deferred with the client JS; add `faster-whisper` to
+  requirements and a transcription module when building it.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.

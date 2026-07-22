@@ -233,17 +233,17 @@ backgrounds for thirty seconds loses part of an answer.
 
 ## 13. Implementation tasks
 
-- [ ] **T3.1** Routing skeleton, error handling, and the health endpoint.
-- [ ] **T8.1** Authentication: both modes, allowlist, startup refusal on bad configuration.
-- [ ] **T8.2** CSRF defense on mutating routes: `SameSite` cookies plus an origin or per-session
+- [x] **T3.1** Routing skeleton, error handling, and the health endpoint.
+- [x] **T8.1** Authentication: both modes, allowlist, startup refusal on bad configuration.
+- [x] **T8.2** CSRF defense on mutating routes: `SameSite` cookies plus an origin or per-session
       token check, refusing forged cross-site requests.
-- [ ] **T9.1** Startup URL printing, all addresses, loopback labelled.
+- [x] **T9.1** Startup URL printing, all addresses, loopback labelled.
 - [ ] **T4.1** Session list page.
 - [ ] **T4.2** Session view: conversation rendering, attachments, printer strip.
-- [ ] **T3.2** SSE endpoint with per-session fan-out and position-based reconnect.
+- [x] **T3.2** SSE endpoint with per-session fan-out and position-based reconnect.
 - [ ] **T6.1** Streamed uploads with pre-body size check, progress, and type validation.
 - [ ] **T4.3** Composer JavaScript: camera capture, upload progress.
 - [ ] **T7.1** Audio recording, cap-and-submit behaviour, transcription handoff.
 - [ ] **T5.1** Approval interface, including refusal properties and multi-viewer resolution.
-- [ ] **T3.3** Emergency stop route and its always-present control.
+- [x] **T3.3** Emergency stop route and its always-present control.
 - [ ] **T4.4** Artifact serving.

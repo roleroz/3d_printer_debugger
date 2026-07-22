@@ -20,3 +20,9 @@ claude-agent-sdk
 
 # Procedures — the calibration catalog documents are YAML data loaded at startup.
 PyYAML
+
+# Web layer — the async framework, server, upload parsing, and (test-only) HTTP client.
+fastapi
+uvicorn
+python-multipart
+httpx

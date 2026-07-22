@@ -1,0 +1,36 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "web",
+    srcs = [
+        "__init__.py",
+        "app.py",
+        "security.py",
+        "sse.py",
+        "startup.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//printer_debugger:init",
+        "//printer_debugger/store",
+        "@pypi//fastapi",
+    ],
+)
+
+py_test(
+    name = "units_test",
+    size = "small",
+    srcs = ["units_test.py"],
+    deps = [":web"],
+)
+
+py_test(
+    name = "app_test",
+    size = "small",
+    srcs = ["app_test.py"],
+    deps = [
+        ":web",
+        "@pypi//httpx",
+    ],
+)
