@@ -1,0 +1,67 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "kb",
+    srcs = [
+        "__init__.py",
+        "config_import.py",
+        "discrepancies.py",
+        "extraction.py",
+        "ingester.py",
+        "klipper_config.py",
+        "models.py",
+        "sectioning.py",
+        "watcher.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//printer_debugger:init",
+        "//printer_debugger/store",
+    ],
+)
+
+# Tests that need only the library.
+[
+    py_test(
+        name = "%s_test" % name,
+        size = "small",
+        srcs = ["%s_test.py" % name],
+        deps = [":kb"],
+    )
+    for name in [
+        "discrepancies",
+        "extraction",
+        "watcher",
+    ]
+]
+
+# Tests that read the Klipper config fixtures.
+[
+    py_test(
+        name = "%s_test" % name,
+        size = "small",
+        srcs = ["%s_test.py" % name],
+        data = glob(["testdata/**"]),
+        deps = [":kb"],
+    )
+    for name in [
+        "klipper_config",
+        "config_import",
+    ]
+]
+
+# Tests that also read the example document fixture.
+[
+    py_test(
+        name = "%s_test" % name,
+        size = "small",
+        srcs = ["%s_test.py" % name],
+        data = glob(["testdata/**"]) + ["//docs/examples:printer_definition.md"],
+        deps = [":kb"],
+    )
+    for name in [
+        "sectioning",
+        "ingester",
+    ]
+]

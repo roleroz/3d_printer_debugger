@@ -262,16 +262,16 @@ None open. Two questions raised here have been settled:
 
 ## 10. Implementation tasks
 
-- [ ] **T3.1** Document watcher: hashing, interval polling, startup ingest.
-- [ ] **T3.2** Sectioning: heading-level detection, section split, preamble handling.
-- [ ] **T3.3** Extraction: structured model call, normalisation, `section_cache` lookup and write
+- [x] **T3.1** Document watcher: hashing, interval polling, startup ingest.
+- [x] **T3.2** Sectioning: heading-level detection, section split, preamble handling.
+- [x] **T3.3** Extraction: structured model call, normalisation, `section_cache` lookup and write
       keyed by section hash for every section.
-- [ ] **T3.4** Printer upsert: degraded status and the missing list, name-absent rejection, and
+- [x] **T3.4** Printer upsert: degraded status and the missing list, name-absent rejection, and
       removal flagging via `absent_since` including reappearance.
-- [ ] **T4.1** Klipper configuration parser: sections, keys, `[include]`, `SAVE_CONFIG`,
+- [x] **T4.1** Klipper configuration parser: sections, keys, `[include]`, `SAVE_CONFIG`,
       retained comments.
-- [ ] **T4.2** Local file import and snapshot writing.
+- [x] **T4.2** Local file import and snapshot writing.
 - [ ] **T4.3** Moonraker live configuration import (depends on the printer access module).
-- [ ] **T5.1** Discrepancy detection for all three kinds, with recording.
-- [ ] **T6.1** Assembling the orchestrator's view: section text, shared context, newest snapshot,
+- [x] **T5.1** Discrepancy detection for all three kinds, with recording.
+- [x] **T6.1** Assembling the orchestrator's view: section text, shared context, newest snapshot,
       discrepancies.

@@ -5,3 +5,7 @@
 
 # Store — cloud object-storage backend (lazy-imported; exercised only against a real bucket).
 google-cloud-storage
+
+# KB ingestion — the small fast model used for per-section extraction (lazy-imported; the
+# hermetic tests inject the extraction call, so this is exercised only live).
+anthropic

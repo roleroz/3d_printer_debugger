@@ -22,6 +22,15 @@ design. It is maintained across the module commits on the `feature/implementatio
   `manual`/`requires-network` live test. `google-cloud-storage` is listed in `requirements.txt`
   but is not exercised by the hermetic suite.
 
+- **[kb] Live Moonraker config import (T4.3) is a seam, not wired.** `config_import.py` defines a
+  `LiveConfigProvider` protocol and `import_live_config`, but the concrete Moonraker-backed
+  provider belongs to the printer-access module (module 4) and is wired at the composition root.
+  T4.3 is left unchecked in `kb_ingestion.md` until then.
+- **[kb] The real extraction model call is unverified.** `extraction._extract_section` calls the
+  Anthropic API (small fast model, `claude-haiku-4-5`) with a strict JSON tool; it is lazy-imported
+  and the hermetic tests inject a stub. **Action:** exercise it against the API with a key.
+  `anthropic` is tracked in `requirements.txt` but not used by the hermetic suite.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.
