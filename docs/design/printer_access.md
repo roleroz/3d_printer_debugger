@@ -224,16 +224,16 @@ rather than guessing either way.
 
 ## 11. Implementation tasks
 
-- [ ] **T3.1** Moonraker client: HTTP queries, WebSocket subscriptions, connection lifecycle with
+- [x] **T3.1** Moonraker client: HTTP queries, WebSocket subscriptions, connection lifecycle with
       backoff.
-- [ ] **T3.2** Startup probe and reachability tracking.
-- [ ] **T4.1** Three-tier state types, with source and read time, and the no-fallback rule.
-- [ ] **T4.2** Runtime state retrieval: mesh with probed points, applied offsets, tilt, runtime
+- [x] **T3.2** Startup probe and reachability tracking.
+- [x] **T4.1** Three-tier state types, with source and read time, and the no-fallback rule.
+- [x] **T4.2** Runtime state retrieval: mesh with probed points, applied offsets, tilt, runtime
       values.
-- [ ] **T4.3** Runtime state capture as an artifact.
-- [ ] **T5.1** Read MCP tools: status, temperatures, position, config, runtime state, logs.
-- [ ] **T6.1** Danger classifier, with macro expansion from the config snapshot and the
+- [x] **T4.3** Runtime state capture as an artifact.
+- [x] **T5.1** Read MCP tools: status, temperatures, position, config, runtime state, logs.
+- [x] **T6.1** Danger classifier, with macro expansion from the config snapshot and the
       unknown-command refusal.
-- [ ] **T5.2** `propose_command` and its handoff to the approval gate.
-- [ ] **T7.1** Webcam capture and artifact storage; absent-capability reporting.
-- [ ] **T2.1** Emergency stop: `M112`, bypassing the agent, the gate, and any queue.
+- [x] **T5.2** `propose_command` and its handoff to the approval gate.
+- [x] **T7.1** Webcam capture and artifact storage; absent-capability reporting.
+- [x] **T2.1** Emergency stop: `M112`, bypassing the agent, the gate, and any queue.

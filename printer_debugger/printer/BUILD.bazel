@@ -1,0 +1,46 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "printer",
+    srcs = [
+        "__init__.py",
+        "danger.py",
+        "emergency.py",
+        "live_config.py",
+        "moonraker.py",
+        "tiers.py",
+        "tools.py",
+        "webcam.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//printer_debugger:init",
+        "//printer_debugger/indexing",
+    ],
+)
+
+[
+    py_test(
+        name = "%s_test" % name,
+        size = "small",
+        srcs = ["%s_test.py" % name],
+        deps = [":printer"],
+    )
+    for name in [
+        "danger",
+        "client",
+    ]
+]
+
+# Live, read-only integration test against a real printer. Excluded from the default suite.
+py_test(
+    name = "live_test",
+    size = "small",
+    srcs = ["live_test.py"],
+    tags = [
+        "manual",
+        "requires-network",
+    ],
+    deps = [":printer"],
+)

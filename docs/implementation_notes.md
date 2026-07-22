@@ -46,6 +46,20 @@ design. It is maintained across the module commits on the `feature/implementatio
   no explicit layer-change comments. If a future file carries `; CHANGE_LAYER`/`; Z_HEIGHT`
   markers, preferring them would be more robust.
 
+- **[printer] The Moonraker client is HTTP-only; the persistent WebSocket subscription is a
+  refinement.** Reads, reachability, and command submission work over HTTP (stdlib `urllib`). The
+  design's §2.1 persistent WebSocket (for always-current live state and print-progress observation)
+  is not implemented; HTTP polling covers the same data. **Action:** add the WebSocket subscription
+  if push latency matters. The live read-only integration test **passed against the real printer**
+  (`voron2.eterovic.xyz`); write and emergency-stop paths are unit-tested against a fake transport
+  only and were never fired at the real machine.
+- **[printer] Runtime-state capture as an artifact (T4.3) returns bytes/metadata; the store write
+  is wired at the composition root** (the tool reports availability and byte count; persisting the
+  webcam/printer-state blob belongs to the orchestrator).
+- **[kb→printer] The live-config provider is implemented** (`printer/live_config.py`) and satisfies
+  the KB `LiveConfigProvider` seam; calling `import_live_config` during ingest is wired at the
+  composition root.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.

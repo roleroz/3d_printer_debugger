@@ -271,7 +271,7 @@ None open. Two questions raised here have been settled:
 - [x] **T4.1** Klipper configuration parser: sections, keys, `[include]`, `SAVE_CONFIG`,
       retained comments.
 - [x] **T4.2** Local file import and snapshot writing.
-- [ ] **T4.3** Moonraker live configuration import (depends on the printer access module).
+- [x] **T4.3** Moonraker live configuration import (depends on the printer access module).
 - [x] **T5.1** Discrepancy detection for all three kinds, with recording.
 - [x] **T6.1** Assembling the orchestrator's view: section text, shared context, newest snapshot,
       discrepancies.
