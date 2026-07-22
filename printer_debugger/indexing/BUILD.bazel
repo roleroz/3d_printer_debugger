@@ -1,0 +1,51 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "indexing",
+    srcs = [
+        "__init__.py",
+        "gcode.py",
+        "gcode_server.py",
+        "gcode_state.py",
+        "geometry.py",
+        "index_format.py",
+        "mcp.py",
+        "project_server.py",
+        "rendering.py",
+        "responses.py",
+        "threemf.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//printer_debugger:init",
+        "@pypi//numpy",
+    ],
+)
+
+py_test(
+    name = "gcode_test",
+    size = "small",
+    srcs = ["gcode_test.py"],
+    data = ["testdata/project.gcode"],
+    deps = [":indexing"],
+)
+
+py_test(
+    name = "threemf_test",
+    size = "small",
+    srcs = ["threemf_test.py"],
+    data = ["testdata/project.3mf"],
+    deps = [":indexing"],
+)
+
+py_test(
+    name = "servers_test",
+    size = "small",
+    srcs = ["servers_test.py"],
+    data = [
+        "testdata/project.3mf",
+        "testdata/project.gcode",
+    ],
+    deps = [":indexing"],
+)

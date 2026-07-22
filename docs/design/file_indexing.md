@@ -297,22 +297,22 @@ three servers is a read. That is what makes the approval gate's job small enough
 
 ## 9. Implementation tasks
 
-- [ ] **T3.1** `.3mf` reader: extract settings, metadata, and thumbnails into the index; retain
+- [x] **T3.1** `.3mf` reader: extract settings, metadata, and thumbnails into the index; retain
       the mesh in the stored artifact for the geometry tools.
-- [ ] **T3.2** Modified-from-preset: expose the preset names and resolved settings; report the diff
+- [x] **T3.2** Modified-from-preset: expose the preset names and resolved settings; report the diff
       unavailable without the preset library (ingesting the library is future work).
-- [ ] **T3.3** Plate layout extraction in plate coordinates (first plate; single-plate assumption).
-- [ ] **T3.4** Object rendering from the retained mesh into image artifacts, by viewpoint.
-- [ ] **T3.5** Object measurements: bounding box, height, footprint, volume, overhang extents.
-- [ ] **T4.1** G-code pass: layer table, byte offsets, line ranges, time offsets, with
+- [x] **T3.3** Plate layout extraction in plate coordinates (first plate; single-plate assumption).
+- [x] **T3.4** Object rendering from the retained mesh into image artifacts, by viewpoint.
+- [x] **T3.5** Object measurements: bounding box, height, footprint, volume, overhang extents.
+- [x] **T4.1** G-code pass: layer table, byte offsets, line ranges, time offsets, with
       absolute/relative positioning and extrusion and arc-move interpretation.
-- [ ] **T4.2** Layer summaries and the event list.
-- [ ] **T4.3** Per-layer state snapshots and the replay-from-layer-start reconstruction.
-- [ ] **T4.4** Object map with per-layer bounding boxes, attributed by slicer object markers with
+- [x] **T4.2** Layer summaries and the event list.
+- [x] **T4.3** Per-layer state snapshots and the replay-from-layer-start reconstruction.
+- [x] **T4.4** Object map with per-layer bounding boxes, attributed by slicer object markers with
       geometric fallback.
-- [ ] **T4.5** Anomaly detection.
+- [x] **T4.5** Anomaly detection.
 - [ ] **T4.6** Background index build with progress reporting and status.
-- [ ] **T5.1** Shared MCP response discipline: ceilings, bounded markers, narrowing guidance.
-- [ ] **T5.2** `project` server tools.
-- [ ] **T5.3** `gcode` server tools.
-- [ ] **T6.1** Format versioning and rebuild-on-outdated.
+- [x] **T5.1** Shared MCP response discipline: ceilings, bounded markers, narrowing guidance.
+- [x] **T5.2** `project` server tools.
+- [x] **T5.3** `gcode` server tools.
+- [x] **T6.1** Format versioning and rebuild-on-outdated.

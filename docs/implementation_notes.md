@@ -31,6 +31,21 @@ design. It is maintained across the module commits on the `feature/implementatio
   and the hermetic tests inject a stub. **Action:** exercise it against the API with a key.
   `anthropic` is tracked in `requirements.txt` but not used by the hermetic suite.
 
+- **[indexing] Background index build (T4.6) is not wired.** `index_status` exists and reports
+  ready, but building the G-code index in the background with progress reporting is an
+  orchestration concern (threads/tasks) wired at the composition root; left unchecked in
+  `file_indexing.md`.
+- **[indexing] Object attribution uses slicer markers only; the geometric fallback is not
+  implemented.** The fixture emits `; printing object` markers, so attribution is exact. The
+  fallback (attribute by plate-layout footprint when markers are absent) has no marker-less fixture
+  to test against and is deferred. **Action:** add a marker-less G-code fixture and the fallback.
+- **[indexing] The MCP wrapping (`mcp.py`) is unverified.** It lazy-imports `claude-agent-sdk` and
+  wraps the tool methods; the tool *logic* is fully tested, but the SDK registration is exercised
+  only live. `claude-agent-sdk` is tracked in `requirements.txt`.
+- **[indexing] Layers are inferred from extruding-Z increases**, since this OrcaSlicer export emits
+  no explicit layer-change comments. If a future file carries `; CHANGE_LAYER`/`; Z_HEIGHT`
+  markers, preferring them would be more robust.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.

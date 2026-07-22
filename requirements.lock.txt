@@ -1,0 +1,5 @@
+# Locked dependencies consumed by Bazel's pip.parse. Regenerate from requirements.txt when it
+# changes. Only packages the hermetic test suite actually imports are pinned here; lazy,
+# deploy-only, or manual-test-only packages (google-cloud-storage, anthropic) are tracked in
+# requirements.txt but not locked into the hermetic build.
+numpy==2.5.1

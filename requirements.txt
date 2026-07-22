@@ -9,3 +9,11 @@ google-cloud-storage
 # KB ingestion — the small fast model used for per-section extraction (lazy-imported; the
 # hermetic tests inject the extraction call, so this is exercised only live).
 anthropic
+
+# File indexing — mesh math (measurements) and the software rasteriser for intended-geometry
+# renders. The .3mf/G-code parsing itself is standard-library only.
+numpy
+
+# The Claude Agent SDK — hosts the in-process MCP servers and drives the agent loop (lazy-imported
+# by the MCP wrapper and the orchestrator; exercised live, not in the hermetic suite).
+claude-agent-sdk
