@@ -1,0 +1,18 @@
+"""3D Printer Debugger — Bazel module.
+
+A Claude-agent-powered assistant for calibrating 3D printers and debugging prints.
+Build and test with Bazel; the container image is built with rules_oci.
+"""
+
+module(
+    name = "printer_debugger",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_python", version = "2.2.0")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.12",
+)

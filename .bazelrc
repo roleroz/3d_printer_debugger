@@ -1,0 +1,11 @@
+# Fail tests loudly and show only failing output.
+test --test_output=errors
+
+# Keep the module lockfile current as dependencies evolve.
+common --lockfile_mode=update
+
+# Live/hardware tests are tagged; exclude them from the default suite.
+test --test_tag_filters=-manual,-requires-network
+
+# Manage __init__.py explicitly rather than relying on implicit creation.
+common --incompatible_default_to_explicit_init_py

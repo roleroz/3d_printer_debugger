@@ -548,25 +548,25 @@ it and no uncertainty to record: it is a deliberate non-goal, not a question.
 
 Each is a single reviewable commit. Marked complete as they land.
 
-- [ ] **T4.1** Schema DDL as migration `001`, all tables, constraints, and indexes from
+- [x] **T4.1** Schema DDL as migration `001`, all tables, constraints, and indexes from
       [§4](#4-schema).
-- [ ] **T4.2** Typed dataclasses for every entity, with the JSON columns modelled as structured
+- [x] **T4.2** Typed dataclasses for every entity, with the JSON columns modelled as structured
       types rather than raw strings.
-- [ ] **T6.1** Connection handling: open, pragmas from [§6](#6-connection-handling), and the
+- [x] **T6.1** Connection handling: open, pragmas from [§6](#6-connection-handling), and the
       off-the-event-loop execution wrapper.
-- [ ] **T7.1** Single-writer discipline: the write connection, its lock, and read connections.
-- [ ] **T8.1** Migration runner: discovery, ordering, transactional application, version
+- [x] **T7.1** Single-writer discipline: the write connection, its lock, and read connections.
+- [x] **T8.1** Migration runner: discovery, ordering, transactional application, version
       recording, and the newer-than-code check.
-- [ ] **T3.1** `StructuredStore` for printers, config snapshots, and their queries.
-- [ ] **T3.2** `StructuredStore` for sessions, bindings, and messages.
-- [ ] **T3.3** `StructuredStore` for tool calls and approvals, including the interrupted-call
+- [x] **T3.1** `StructuredStore` for printers, config snapshots, and their queries.
+- [x] **T3.2** `StructuredStore` for sessions, bindings, and messages.
+- [x] **T3.3** `StructuredStore` for tool calls and approvals, including the interrupted-call
       sweep at startup.
-- [ ] **T3.4** `StructuredStore` for artifacts, file indexes, and procedure results.
-- [ ] **T3.5** `ArtifactStore` interface and the local filesystem implementation, streaming both
+- [x] **T3.4** `StructuredStore` for artifacts, file indexes, and procedure results.
+- [x] **T3.5** `ArtifactStore` interface and the local filesystem implementation, streaming both
       ways, with the key layout from [§5](#5-artifact-key-layout).
-- [ ] **T3.6** Object-storage implementation of `ArtifactStore`.
-- [ ] **T10.1** Storage accounting: database size, artifact total, breakdown by kind.
-- [ ] **T9.1** Backup and restore, including the ordering rule in [§9](#9-backup-and-restore) and
+- [x] **T3.6** Object-storage implementation of `ArtifactStore`.
+- [x] **T10.1** Storage accounting: database size, artifact total, breakdown by kind.
+- [x] **T9.1** Backup and restore, including the ordering rule in [§9](#9-backup-and-restore) and
       the documented procedure.
 
 Tasks are ordered by dependency: schema and connections before the stores that use them, the

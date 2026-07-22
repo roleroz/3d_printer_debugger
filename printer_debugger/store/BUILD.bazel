@@ -1,0 +1,40 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "store",
+    srcs = [
+        "__init__.py",
+        "accounting.py",
+        "artifact_store.py",
+        "async_store.py",
+        "backup.py",
+        "db.py",
+        "errors.py",
+        "ids.py",
+        "models.py",
+        "structured_store.py",
+    ],
+    data = glob(["migrations/*.sql"]),
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = ["//printer_debugger:init"],
+)
+
+_TESTS = [
+    "db",
+    "structured_store",
+    "artifact_store",
+    "accounting",
+    "backup",
+    "async_store",
+]
+
+[
+    py_test(
+        name = "%s_test" % name,
+        size = "small",
+        srcs = ["%s_test.py" % name],
+        deps = [":store"],
+    )
+    for name in _TESTS
+]

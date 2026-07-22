@@ -1,0 +1,7 @@
+# Human-maintained source of truth for external dependencies.
+# Bazel consumes a generated requirements.lock.txt via pip.parse; regenerate the lock after
+# editing this file. Standard-library-only modules (e.g. the store's SQLite half) add nothing
+# here.
+
+# Store — cloud object-storage backend (lazy-imported; exercised only against a real bucket).
+google-cloud-storage
