@@ -60,6 +60,19 @@ design. It is maintained across the module commits on the `feature/implementatio
   the KB `LiveConfigProvider` seam; calling `import_live_config` during ingest is wired at the
   composition root.
 
+- **[orchestration] The Agent-SDK adapter is not implemented (T4.1, T7.1).** The turn loop
+  (`turn.py`) drives an `AgentClient` seam and is fully tested with a fake client; the concrete
+  adapter that wraps `claude-agent-sdk` (agent configuration with the four permission mechanisms,
+  streaming, client release/resume/replay) is deferred and wired at the composition root.
+- **[orchestration] The web-fetch SSRF guard (T4.3) is not implemented here.** The design places
+  the loopback/private/link-local refusal on web fetch; whether the SDK enforces it or a fetch
+  proxy is needed is an open question. Left unchecked; must be added before enabling web fetch in a
+  cloud deployment.
+- **[orchestration] The approval gate, binding, prompt assembly, turn loop, and startup recovery
+  are fully implemented and tested** — including the security-critical gate paths (approve, reject,
+  timeout-as-denial, crash-recovery-to-denial, no-bypass). This is the load-bearing security
+  component and it is green.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.

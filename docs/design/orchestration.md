@@ -277,17 +277,17 @@ crash must never resolve to an approval.
 
 ## 10. Implementation tasks
 
-- [ ] **T3.1** Session lifecycle: create, name, rename, close, reopen, list.
-- [ ] **T3.2** Printer binding: detection from project identity, prompting, reassignment with
+- [x] **T3.1** Session lifecycle: create, name, rename, close, reopen, list.
+- [x] **T3.2** Printer binding: detection from project identity, prompting, reassignment with
       history, mismatch as a finding.
 - [ ] **T4.1** Agent client configuration, including all four permission mechanisms.
-- [ ] **T4.2** System prompt assembly with stable-first ordering.
+- [x] **T4.2** System prompt assembly with stable-first ordering.
 - [ ] **T4.3** Web-fetch address restriction: refuse loopback, private, and link-local addresses,
       by SDK configuration or a fetch proxy, so it cannot reach the printer LAN.
-- [ ] **T5.1** Turn loop: streaming, incremental persistence, usage accumulation.
-- [ ] **T5.2** Interrupted-call sweep at startup.
-- [ ] **T6.1** The approval gate: classification handoff, persistence, publication, awaited
+- [x] **T5.1** Turn loop: streaming, incremental persistence, usage accumulation.
+- [x] **T5.2** Interrupted-call sweep at startup.
+- [x] **T6.1** The approval gate: classification handoff, persistence, publication, awaited
       decision, recording.
-- [ ] **T6.2** Timeout handling with an injectable clock.
-- [ ] **T6.3** Crash-safety: pending proposals resolve to denial on restart.
+- [x] **T6.2** Timeout handling with an injectable clock.
+- [x] **T6.3** Crash-safety: pending proposals resolve to denial on restart.
 - [ ] **T7.1** Client lifecycle: release on idle, resume on return, replay when resume fails.
