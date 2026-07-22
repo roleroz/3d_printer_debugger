@@ -1,0 +1,32 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "procedures",
+    srcs = [
+        "__init__.py",
+        "catalog.py",
+        "preconditions.py",
+        "recording.py",
+    ],
+    data = glob(["documents/*.yaml"]),
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//printer_debugger:init",
+        "//printer_debugger/store",
+        "@pypi//pyyaml",
+    ],
+)
+
+[
+    py_test(
+        name = "%s_test" % name,
+        size = "small",
+        srcs = ["%s_test.py" % name],
+        deps = [":procedures"],
+    )
+    for name in [
+        "catalog",
+        "procedures",
+    ]
+]

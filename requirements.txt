@@ -17,3 +17,6 @@ numpy
 # The Claude Agent SDK — hosts the in-process MCP servers and drives the agent loop (lazy-imported
 # by the MCP wrapper and the orchestrator; exercised live, not in the hermetic suite).
 claude-agent-sdk
+
+# Procedures — the calibration catalog documents are YAML data loaded at startup.
+PyYAML

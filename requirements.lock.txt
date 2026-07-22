@@ -3,3 +3,4 @@
 # deploy-only, or manual-test-only packages (google-cloud-storage, anthropic) are tracked in
 # requirements.txt but not locked into the hermetic build.
 numpy==2.5.1
+PyYAML==6.0.2

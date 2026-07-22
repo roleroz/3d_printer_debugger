@@ -1,0 +1,31 @@
+id: temperature
+name: Temperature tuning
+scope: printer_and_filament
+purpose: >
+  Find the nozzle and bed temperatures that give the best layer adhesion and surface finish for a
+  filament on a specific printer. Per filament per printer, since hotend and airflow both matter.
+preconditions:
+  - condition: printer_idle
+    disables: the temperature tower cannot start mid-print
+    fix: wait until the current print finishes
+  - condition: material_loaded
+    disables: the calibration is material-specific
+    fix: load the filament being calibrated
+hardware_requirements: []
+steps:
+  - intent: print a temperature tower spanning the material's range
+    commands: []
+    physical: print the tower and compare bands for adhesion, stringing, and finish
+test_source:
+  kind: slicer
+  detail: OrcaSlicer's temperature-tower calibration
+evidence: a photograph of the tower and the chosen nozzle and bed temperatures
+interpretation: >
+  The best band balances layer bonding against stringing and surface quality. Too hot strings and
+  sags; too cool bonds poorly and looks matte or delaminates.
+results:
+  - nozzle_temperature
+  - bed_temperature
+records: >
+  Record the nozzle and bed temperatures for this filament on this printer, and suggest a
+  calibration-status note.

@@ -1,0 +1,35 @@
+id: pressure_advance_flow
+name: Pressure advance and flow ratio
+scope: printer_and_filament
+purpose: >
+  Tune pressure advance so corners and line starts are crisp, and the flow ratio so extrusion width
+  is accurate. Both are per filament on a specific printer, since extruder and material both matter.
+preconditions:
+  - condition: printer_idle
+    disables: the test print cannot start mid-print
+    fix: wait until the current print finishes
+  - condition: material_loaded
+    disables: the calibration is material-specific
+    fix: load the filament being calibrated
+hardware_requirements: []
+steps:
+  - intent: print the pressure-advance test and read the best band
+    commands: []
+    physical: print the generated test object and inspect the corners
+  - intent: apply the chosen pressure advance
+    commands: [SET_PRESSURE_ADVANCE]
+    physical: none
+test_source:
+  kind: generator
+  detail: OrcaSlicer's pressure-advance calibration, or Ellis's Pressure/Linear Advance tool
+    (https://ellis3dp.com/Pressure_Linear_Advance_Tool/)
+evidence: a photograph of the test object and the chosen pressure advance and flow ratio
+interpretation: >
+  The best band shows sharp corners without bulging or gaps. Over-advance under-extrudes at corners;
+  under-advance bulges them.
+results:
+  - pressure_advance
+  - flow_ratio
+records: >
+  Record the pressure advance and flow ratio for this filament on this printer, and suggest a
+  calibration-status note.

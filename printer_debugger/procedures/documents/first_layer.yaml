@@ -1,0 +1,36 @@
+id: first_layer
+name: First layer and Z-offset
+scope: printer_and_filament
+purpose: >
+  Establish a clean, well-adhered first layer. The mechanical Z-offset belongs to the printer and
+  is saved to its config; the first-layer temperature, speed, squish, and cooling are per filament.
+  The split matters — do not carry a filament-specific value across to another material.
+preconditions:
+  - condition: printer_homed
+    disables: Z-offset adjustment needs a homed, probed printer
+    fix: home the printer and run its probe/mesh routine
+  - condition: material_loaded
+    disables: a first layer cannot be judged without the material loaded
+    fix: load the filament being calibrated
+hardware_requirements: []
+steps:
+  - intent: print a single-layer patch and adjust live Z until the squish is even
+    commands: [SET_GCODE_OFFSET]
+    physical: watch the first layer and adjust; confirm even, well-bonded lines
+  - intent: persist the mechanical Z-offset to the printer's saved config
+    commands: [SAVE_CONFIG]
+    physical: none
+test_source:
+  kind: slicer
+  detail: OrcaSlicer's first-layer / temperature calibration, or a single-layer patch
+evidence: a photograph of the first layer, and the applied Z-offset
+interpretation: >
+  Even, slightly-squished lines that bond without smearing indicate a good offset. Gaps mean the
+  nozzle is too high; translucent smearing means too low.
+results:
+  - first_layer_temperature
+  - first_layer_speed
+  - first_layer_squish
+records: >
+  Record the filament-scoped first-layer values in the session (the mechanical Z-offset lives in
+  saved config), and suggest a calibration-status note.

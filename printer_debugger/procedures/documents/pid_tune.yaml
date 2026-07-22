@@ -1,0 +1,37 @@
+id: pid_tune
+name: PID tuning (bed and hotend)
+scope: printer
+purpose: >
+  Tune the PID constants for the bed and hotend heaters so they hold temperature without
+  oscillation. Worth doing after replacing a heater, thermistor, or hotend, or when temperatures
+  swing during a print.
+preconditions:
+  - condition: printer_idle
+    disables: PID calibration drives the heater and must not run mid-print
+    fix: wait until the current print finishes
+hardware_requirements: []
+steps:
+  - intent: tune the hotend heater at a typical printing temperature
+    commands: [PID_CALIBRATE HEATER=extruder TARGET=240]
+    physical: none; the printer cycles the heater automatically
+  - intent: tune the bed heater at a typical bed temperature
+    commands: [PID_CALIBRATE HEATER=heater_bed TARGET=80]
+    physical: none
+  - intent: persist the tuned values
+    commands: [SAVE_CONFIG]
+    physical: none
+test_source: null
+evidence: the resulting Kp, Ki, Kd for each heater
+interpretation: >
+  A successful calibration reports stable constants. Failure to converge points at a heater or
+  thermistor fault to investigate rather than re-run.
+results:
+  - extruder_pid_kp
+  - extruder_pid_ki
+  - extruder_pid_kd
+  - bed_pid_kp
+  - bed_pid_ki
+  - bed_pid_kd
+records: >
+  Record the PID values per heater in the session, and suggest updating the printer's
+  calibration-status note.

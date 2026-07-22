@@ -247,14 +247,14 @@ starting point to be re-tuned, labelled as such. It must never be presented as t
 
 ## 11. Implementation tasks
 
-- [ ] **T3.1** Catalog format, loader, and startup validation.
-- [ ] **T3.2** Scope-declaration cross-check against the schema constraint.
-- [ ] **T4.1** `input_shaper` and `pid_tune` documents (printer-scoped).
-- [ ] **T4.2** `first_layer` document, including the mixed-scope split and routing the mechanical
+- [x] **T3.1** Catalog format, loader, and startup validation.
+- [x] **T3.2** Scope-declaration cross-check against the schema constraint.
+- [x] **T4.1** `input_shaper` and `pid_tune` documents (printer-scoped).
+- [x] **T4.2** `first_layer` document, including the mixed-scope split and routing the mechanical
       Z-offset to saved config rather than `procedure_result`.
-- [ ] **T4.3** `pressure_advance_flow`, `temperature`, and `stringing_retraction` documents.
-- [ ] **T5.1** Precondition and hardware-requirement checking against configuration and live state.
-- [ ] **T7.1** Result recording with scope enforcement and evidence references.
-- [ ] **T7.2** Suggested KB-document edit generation.
-- [ ] **T3.3** Catalog inclusion in system prompt assembly (with
+- [x] **T4.3** `pressure_advance_flow`, `temperature`, and `stringing_retraction` documents.
+- [x] **T5.1** Precondition and hardware-requirement checking against configuration and live state.
+- [x] **T7.1** Result recording with scope enforcement and evidence references.
+- [x] **T7.2** Suggested KB-document edit generation.
+- [x] **T3.3** Catalog inclusion in system prompt assembly (with
       [orchestration.md](orchestration.md)).

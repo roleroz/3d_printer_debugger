@@ -1,0 +1,36 @@
+id: input_shaper
+name: Input shaper calibration
+scope: printer
+purpose: >
+  Measure the printer's resonance frequencies per axis and choose a shaper that cancels ringing.
+  Worth doing after any change to the moving mass (toolhead rebuild, belt changes) or when ghosting
+  appears on prints.
+preconditions:
+  - condition: printer_idle
+    disables: the resonance test cannot run while a print is in progress
+    fix: wait until the current print finishes
+  - condition: printer_homed
+    disables: the toolhead must be homed before it can be driven to the test point
+    fix: home the printer
+hardware_requirements:
+  - an accelerometer (adxl345 or lis2dw) on the toolhead
+steps:
+  - intent: run the automated resonance test on each axis
+    commands: [SHAPER_CALIBRATE]
+    physical: none; the printer drives the toolhead and reads the accelerometer
+  - intent: persist the chosen shaper
+    commands: [SAVE_CONFIG]
+    physical: none
+test_source: null
+evidence: the resonance graphs and the recommended shaper and frequency per axis
+interpretation: >
+  A clean resonance peak gives a confident shaper choice. Broad or noisy spectra suggest a loose
+  accelerometer mount or a mechanical problem to fix before trusting the result.
+results:
+  - shaper_type_x
+  - shaper_freq_x
+  - shaper_type_y
+  - shaper_freq_y
+records: >
+  Record the shaper type and frequency per axis in the session, and suggest updating the printer's
+  calibration-status note that input shaping was run.

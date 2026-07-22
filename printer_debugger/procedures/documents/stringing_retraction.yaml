@@ -1,0 +1,32 @@
+id: stringing_retraction
+name: Stringing and retraction tuning
+scope: printer_and_filament
+purpose: >
+  Tune retraction length and speed, and travel behaviour, to eliminate stringing and zits. Per
+  filament per printer, since the extruder geometry and the material's viscosity both matter.
+preconditions:
+  - condition: printer_idle
+    disables: the retraction test cannot start mid-print
+    fix: wait until the current print finishes
+  - condition: material_loaded
+    disables: the calibration is material-specific
+    fix: load the filament being calibrated
+hardware_requirements: []
+steps:
+  - intent: print a retraction / stringing test across a range of retraction settings
+    commands: []
+    physical: print the test and inspect the towers for strings and blobs
+test_source:
+  kind: slicer
+  detail: OrcaSlicer's retraction test, or a community stringing test model (e.g. on Printables)
+evidence: a photograph of the test and the chosen retraction length and speed
+interpretation: >
+  Clean gaps between towers indicate good retraction. Wispy strings mean too little retraction or a
+  too-hot nozzle; blobs at travel starts mean too much.
+results:
+  - retraction_length
+  - retraction_speed
+  - travel_speed
+records: >
+  Record the retraction length, speed, and travel settings for this filament on this printer, and
+  suggest a calibration-status note.
