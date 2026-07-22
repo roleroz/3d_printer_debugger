@@ -1,3 +1,5 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("@rules_python//python:pip.bzl", "compile_pip_requirements")
 
 exports_files([
@@ -10,4 +12,36 @@ compile_pip_requirements(
     name = "requirements",
     src = "requirements.txt",
     requirements_txt = "requirements.lock.txt",
+)
+
+# Container image: the app binary (with its bundled hermetic interpreter and deps) layered onto a
+# debian-slim base, built with rules_oci — no Dockerfile, no Docker daemon.
+pkg_tar(
+    name = "app_layer",
+    srcs = ["//printer_debugger:main"],
+    include_runfiles = True,
+    package_dir = "/app",
+    strip_prefix = ".",
+)
+
+oci_image(
+    name = "image",
+    base = "@debian_base",
+    tars = [":app_layer"],
+    entrypoint = [
+        "/app/printer_debugger/main",
+        "--data-dir",
+        "/data",
+    ],
+    env = {"PD_AUTH_MODE": "local", "PD_PORT": "8080"},
+    exposed_ports = ["8080/tcp"],
+    visibility = ["//visibility:public"],
+)
+
+# `bazel run //:load` loads the image into the local Docker daemon as printer-debugger:latest.
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["printer-debugger:latest"],
+    visibility = ["//visibility:public"],
 )

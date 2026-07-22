@@ -9,3 +9,8 @@ test --test_tag_filters=-manual,-requires-network
 
 # Manage __init__.py explicitly rather than relying on implicit creation.
 common --incompatible_default_to_explicit_init_py
+
+# Use the bash "script" bootstrap so py_binary execs the bundled hermetic interpreter directly,
+# rather than a stage-1 Python launcher that needs a system python3. Required for the minimal
+# container base (debian-slim has no python3).
+build --@rules_python//python/config_settings:bootstrap_impl=script

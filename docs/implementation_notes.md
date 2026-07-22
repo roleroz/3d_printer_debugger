@@ -87,6 +87,19 @@ design. It is maintained across the module commits on the `feature/implementatio
   capture/transcription (T7.1) is deferred with the client JS; add `faster-whisper` to
   requirements and a transcription module when building it.
 
+- **[container] The OCI image builds via Bazel; the no-system-python case is verified.**
+  `bazel build //:image` succeeds (rules_oci, `debian:12-slim` base pinned by digest). The binary
+  uses the rules_python **`script` (bash) bootstrap** (`.bazelrc`) so it execs the bundled hermetic
+  interpreter directly rather than a stage-1 `#!/usr/bin/env python3` launcher — debian-slim has no
+  `python3`. This was verified by running the binary with `python3` removed from PATH
+  (`env -i PATH=<no-python> main --check` → "build check OK"). The only step not run here is the
+  actual `bazel run //:load` + `docker run` (Docker daemon socket was permission-denied); the
+  interpreter-without-system-python risk that would have caused is now covered.
+- **[container] `main.py` is the composition root and is intentionally minimal.** It wires the
+  store + web app + local auth and serves. The Agent-SDK adapter, the printer/KB live providers,
+  the MCP servers, and the orchestrator turn loop are **not yet wired into it** — those are the
+  deferred adapters noted above. A full deployment wires them here.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.

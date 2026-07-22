@@ -10,6 +10,17 @@ module(
 )
 
 bazel_dep(name = "rules_python", version = "2.2.0")
+bazel_dep(name = "rules_oci", version = "2.3.0")
+bazel_dep(name = "rules_pkg", version = "1.2.0")
+
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "debian_base",
+    image = "docker.io/library/debian",
+    digest = "sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818",
+    platforms = ["linux/amd64"],
+)
+use_repo(oci, "debian_base", "debian_base_linux_amd64")
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
