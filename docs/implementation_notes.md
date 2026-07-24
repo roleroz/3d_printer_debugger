@@ -68,8 +68,13 @@ design. It is maintained across the module commits on the `feature/implementatio
   is wired at the composition root** (the tool reports availability and byte count; persisting the
   webcam/printer-state blob belongs to the orchestrator).
 - **[kb→printer] The live-config provider is implemented** (`printer/live_config.py`) and satisfies
-  the KB `LiveConfigProvider` seam; calling `import_live_config` during ingest is wired at the
-  composition root.
+  the KB `LiveConfigProvider` seam, but calling `import_live_config` during ingest is **NOT yet
+  wired at the composition root** — `import_live_config` is referenced nowhere in
+  `composition.py`/`main.py`. So an ingest today imports Klipper config only from the local paths
+  the markdown references (`_import_local`), which are absent inside the container → the affected
+  printers come back `degraded`. **Action:** wire `import_live_config` into the ingest path so a
+  reachable printer's config is pulled from Moonraker. (Consistent with the "KB document is not
+  auto-ingested" note below.)
 
 - **[orchestration] The Agent-SDK adapter is now wired end-to-end (T4.1).** `sdk_config.py` (the
   four permission mechanisms), `sdk_translate.py` (SDK message → `AgentEvent`), and the permission
@@ -91,10 +96,12 @@ design. It is maintained across the module commits on the `feature/implementatio
   machine exactly once (regression-tested in `composition_test.py`). **Still needs the maintainer:**
   a `manual` live test with real subscription credentials (the SDK is never invoked hermetically);
   and session release-on-idle / replay-on-resume-failure (T7.1) — only the `resume=` seam is wired.
-- **[orchestration] The web-fetch SSRF guard (T4.3) is not implemented here.** The design places
-  the loopback/private/link-local refusal on web fetch; whether the SDK enforces it or a fetch
-  proxy is needed is an open question. Left unchecked; must be added before enabling web fetch in a
-  cloud deployment.
+- **[orchestration] The web-fetch SSRF guard (T4.3) was intentionally dropped**
+  ([decisions.md 2026-07-23 "Web-fetch SSRF guard dropped"]). WebFetch/WebSearch are Anthropic
+  **server tools** — they execute on Anthropic infrastructure, not on the host — so the
+  LAN-bypass threat that motivated a loopback/private/link-local refusal does not exist for this
+  architecture. No guard is needed, including in a cloud deployment. (This supersedes the earlier
+  "must be added before enabling web fetch" note.)
 - **[orchestration] The approval gate, binding, prompt assembly, turn loop, and startup recovery
   are fully implemented and tested** — including the security-critical gate paths (approve, reject,
   timeout-as-denial, crash-recovery-to-denial, no-bypass). This is the load-bearing security
