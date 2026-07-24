@@ -11,9 +11,10 @@ import asyncio
 import io
 import json
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, BinaryIO, Callable, Iterator
+from typing import Any, AsyncIterator, Awaitable, BinaryIO, Callable, Iterator
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -54,7 +55,18 @@ class AppContext:
 
 def create_app(context: AppContext) -> FastAPI:
     """Build the application with its routes and the auth/CSRF middleware."""
-    app = FastAPI()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # On shutdown, close the hub so every open SSE generator is unblocked and returns.
+        # Without this, the long-lived event streams keep uvicorn's graceful shutdown
+        # waiting forever on Ctrl+C.
+        try:
+            yield
+        finally:
+            context.hub.close()
+
+    app = FastAPI(lifespan=lifespan)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -259,6 +271,8 @@ async def _event_stream(hub: SseHub, session_id: str, last_id: int, request: Req
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
+            if event is None:  # shutdown sentinel from hub.close(); stop so uvicorn drains
+                break
             yield _frame(event)
     finally:
         hub.unsubscribe(session_id, queue)

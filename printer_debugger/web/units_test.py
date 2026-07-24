@@ -92,6 +92,60 @@ class SseHubTest(unittest.TestCase):
         hub.unsubscribe("s", q1)
         self.assertEqual(hub.subscriber_count("s"), 1)
 
+    def test_close_unblocks_and_primes_subscribers(self) -> None:
+        """close() hands the None shutdown sentinel to both current and future subscribers."""
+
+        async def scenario() -> None:
+            hub = SseHub()
+            existing = hub.subscribe("s")
+            self.assertFalse(hub.is_closed)
+            hub.close()
+            self.assertTrue(hub.is_closed)
+            self.assertIsNone(await existing.get())  # a parked subscriber is unblocked
+            later = hub.subscribe("s")  # someone connecting during shutdown
+            self.assertIsNone(await later.get())  # is primed with the sentinel at once
+
+        asyncio.run(scenario())
+
+    def test_close_is_idempotent(self) -> None:
+        """Calling close() more than once is safe and keeps the hub marked closed."""
+        hub = SseHub()
+        hub.subscribe("s")
+        hub.close()
+        hub.close()
+        self.assertTrue(hub.is_closed)
+
+    def test_close_terminates_subscribed_stream(self) -> None:
+        """A live SSE generator returns promptly once the hub is closed on shutdown.
+
+        This is the regression test for the Ctrl+C hang: before the sentinel/close wiring the
+        stream loops on ``queue.get()`` forever, so uvicorn's graceful shutdown never drains.
+        """
+
+        async def scenario() -> None:
+            from printer_debugger.web.app import _event_stream
+
+            hub = SseHub()
+
+            class _NeverDisconnects:
+                async def is_disconnected(self) -> bool:
+                    return False
+
+            frames: list[str] = []
+
+            async def drain() -> None:
+                async for frame in _event_stream(hub, "s", 0, _NeverDisconnects()):
+                    frames.append(frame)
+
+            task = asyncio.create_task(drain())
+            while hub.subscriber_count("s") == 0:  # let it reach the blocking queue.get()
+                await asyncio.sleep(0)
+            hub.close()
+            await asyncio.wait_for(task, timeout=2.0)  # hangs forever without the fix
+            self.assertEqual(hub.subscriber_count("s"), 0)  # generator unsubscribed on exit
+
+        asyncio.run(scenario())
+
 
 class StartupTest(unittest.TestCase):
     """Startup prints reachable URLs, not localhost, and flags loopback-only binds."""

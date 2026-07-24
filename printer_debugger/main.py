@@ -102,7 +102,9 @@ def main() -> int:
     )
     import uvicorn
 
-    uvicorn.run(app, host=args.host, port=args.port)
+    # The app's lifespan shutdown closes the SSE hub so every stream returns; this bounded
+    # graceful-shutdown timeout is a backstop in case any connection is still draining.
+    uvicorn.run(app, host=args.host, port=args.port, timeout_graceful_shutdown=5)
     return 0
 
 
