@@ -11,7 +11,12 @@ design. It is maintained across the module commits on the `feature/implementatio
   `requires-network` and are excluded from the default run (see `.bazelrc`).
 - **Dependencies:** `requirements.txt` is the human source of truth; a `requirements.lock.txt`
   (generated) is what Bazel's `pip.parse` consumes. Modules that need third-party packages wire
-  them in as they are added.
+  them in as they are added. The lock now includes `claude-agent-sdk` and its full transitive
+  closure (`mcp`, `httpx-sse`, `jsonschema` (+`attrs`, `jsonschema-specifications`, `referencing`,
+  `rpds-py`), `pydantic-settings`, `pyjwt`, `python-dotenv`, `sse-starlette`, `cryptography`+`cffi`+
+  `pycparser`, `sniffio`), generated with pip against the real package. `google-cloud-storage` and
+  `anthropic` remain in `requirements.txt` but out of the lock (exercised only against their live
+  services).
 
 ## Needs the maintainer
 
@@ -39,9 +44,15 @@ design. It is maintained across the module commits on the `feature/implementatio
   implemented.** The fixture emits `; printing object` markers, so attribution is exact. The
   fallback (attribute by plate-layout footprint when markers are absent) has no marker-less fixture
   to test against and is deferred. **Action:** add a marker-less G-code fixture and the fallback.
-- **[indexing] The MCP wrapping (`mcp.py`) is unverified.** It lazy-imports `claude-agent-sdk` and
-  wraps the tool methods; the tool *logic* is fully tested, but the SDK registration is exercised
-  only live. `claude-agent-sdk` is tracked in `requirements.txt`.
+- **[indexing] The MCP wrapping (`mcp.py`) is fleshed out; the SDK registration line is exercised
+  only live.** `build_sdk_server(name, instance)` wraps every public tool method: it derives a
+  minimal JSON input schema from the method signature (`input_schema`, resolving PEP-563 string
+  annotations), calls the sync method with the decoded args, and returns the bounded dict as MCP
+  text content (`format_result`), turning a `ToolError` into an MCP error result (`format_error`).
+  The bare method name is passed to the SDK's `tool()`, so the tool qualifies as
+  `mcp__{server}__{method}` — matching the allowlist (confirmed against the installed SDK). These
+  pure adapters are hermetically tested (`servers_test.py::McpAdapterTest`); the single
+  `create_sdk_mcp_server` call is lazy-imported and runs only on the live path.
 - **[indexing] Layers are inferred from extruding-Z increases**, since this OrcaSlicer export emits
   no explicit layer-change comments. If a future file carries `; CHANGE_LAYER`/`; Z_HEIGHT`
   markers, preferring them would be more robust.
@@ -60,18 +71,26 @@ design. It is maintained across the module commits on the `feature/implementatio
   the KB `LiveConfigProvider` seam; calling `import_live_config` during ingest is wired at the
   composition root.
 
-- **[orchestration] The Agent-SDK adapter's core is built and tested; end-to-end wiring remains
-  (T4.1, T7.1).** `sdk_config.py` (the four permission mechanisms — allow/deny tool lists, deny-
-  unlisted, the gated write), `sdk_translate.py` (SDK message → `AgentEvent`), and the permission
-  decision in `sdk_client.py` (gate the write, deny unlisted, never ask about a denied tool) are
-  **hermetically tested** without pulling the 273 MB SDK. `ClaudeAgentClient.run_turn` drives
-  `claude-agent-sdk` (lazy import; live path). **Remaining before conversations work end-to-end:**
-  (1) add `claude-agent-sdk` to `requirements.lock.txt` and make `//printer_debugger:main` depend
-  on it so the image carries it (the ~273 MB lands only in the image, not `bazel test //...`);
-  (2) build the per-session in-process MCP servers by wrapping `ProjectTools`/`GcodeTools`/
-  `PrinterTools` with `create_sdk_mcp_server`, and wire `build_servers`/`build_prompt`/`approve`
-  (approve → the `ApprovalGate`) at the composition root; (3) a `manual` live test with subscription
-  credentials. Session resume/replay (T7.1) is the `resume=` seam, wired with (2).
+- **[orchestration] The Agent-SDK adapter is now wired end-to-end (T4.1).** `sdk_config.py` (the
+  four permission mechanisms), `sdk_translate.py` (SDK message → `AgentEvent`), and the permission
+  decision in `sdk_client.py` (gate the write, deny unlisted, never ask about a denied tool) remain
+  **hermetically tested** without pulling the SDK. On top of them, `printer_debugger/composition.py`
+  now wires the whole turn: `build_servers` builds the per-session in-process MCP servers,
+  `build_prompt` assembles the system prompt from the procedure catalog + the bound printer's KB
+  view + session state, and `make_approve` bridges the SDK permission callback to the `ApprovalGate`
+  (publish the proposal onto the session's SSE stream → await the human via `POST /approvals/{id}` →
+  `gate.resolve` → record). `main.py` composes it. **Credentials:** the subscription OAuth token is
+  read from `CLAUDE_CODE_OAUTH_TOKEN` (confirmed by inspecting the installed
+  `claude-agent-sdk` 0.2.126 — it reads that name from `ClaudeAgentOptions.env` or the process env;
+  create one with `claude setup-token`). `composition.require_oauth_token` crashes at startup if it
+  is absent (no API-key fallback), and passes it to the SDK via `ClaudeAgentOptions.env`.
+  `PD_MODEL`/`PD_EFFORT` configure the model (default `claude-opus-4-8`) and effort (default
+  `medium`). **Execution locus of a printer write ([decisions.md 2026-07-23]):** the gate *decides
+  only* — its `execute` is a no-op; the `propose_command` MCP tool performs the single actual
+  submission to Moonraker (`make_command_submitter`), on the approved path, so a command reaches the
+  machine exactly once (regression-tested in `composition_test.py`). **Still needs the maintainer:**
+  a `manual` live test with real subscription credentials (the SDK is never invoked hermetically);
+  and session release-on-idle / replay-on-resume-failure (T7.1) — only the `resume=` seam is wired.
 - **[orchestration] The web-fetch SSRF guard (T4.3) is not implemented here.** The design places
   the loopback/private/link-local refusal on web fetch; whether the SDK enforces it or a fetch
   proxy is needed is an open question. Left unchecked; must be added before enabling web fetch in a
@@ -99,9 +118,17 @@ design. It is maintained across the module commits on the `feature/implementatio
   by content-type (image → photo, audio → audio). The JSON reads moved to `GET /api/sessions` and
   `GET /api/sessions/{id}`; the mutating routes still return JSON. The OIDC integration is still an
   `X-Auth-Subject` seam; a real OIDC middleware validates and sets it.
-- **[web] Still deferred in the UI shell:** the live Claude-agent conversation (assistant replies
-  arrive over SSE only once the Agent-SDK adapter is wired — the composer optimistically renders the
-  user's message and no assistant text is produced yet); server-side Whisper transcription (the clip
+- **[web] The live Claude-agent conversation is now wired.** `AppContext.on_message` runs a turn via
+  the turn loop against the `ClaudeAgentClient`, and each event is streamed to the session's SSE hub
+  (`assistant` text frames, `tool` activity frames) so the browser renders replies as they arrive.
+  `POST /sessions/{id}/messages` delegates to the handler (which persists the user message); it only
+  persists the message itself as a fallback when no handler is wired, so a message is never stored
+  twice. The upload route (`POST /sessions/{id}/files`) now classifies the file by its `X-Filename`
+  extension (`.gcode`→G-code with an index, `.3mf`→project stored whole) and calls an injected
+  `on_upload` hook that builds and stores the G-code index synchronously while the request is open.
+  SSE `data` frames carry JSON objects (the client `JSON.parse`s them, and `app.py::_frame`
+  `json.dumps`es the payload), so publishers pass dicts.
+- **[web] Still deferred in the UI shell:** server-side Whisper transcription (the clip
   uploads and is marked "transcription pending" — `faster-whisper` was chosen and should be added to
   `requirements.txt` with a transcription module when built, T7.1); real printer-strip data (the
   strip is structured with `data-field` hooks and shows placeholder temps/status until the printer
@@ -116,10 +143,23 @@ design. It is maintained across the module commits on the `feature/implementatio
   (`env -i PATH=<no-python> main --check` → "build check OK"). The only step not run here is the
   actual `bazel run //:load` + `docker run` (Docker daemon socket was permission-denied); the
   interpreter-without-system-python risk that would have caused is now covered.
-- **[container] `main.py` is the composition root and is intentionally minimal.** It wires the
-  store + web app + local auth and serves. The Agent-SDK adapter, the printer/KB live providers,
-  the MCP servers, and the orchestrator turn loop are **not yet wired into it** — those are the
-  deferred adapters noted above. A full deployment wires them here.
+- **[container] `main.py` is the composition root and now wires the agent.** It builds the store +
+  artifact store + web app, requires the OAuth token (crashing if absent), runs startup recovery
+  (`sweep_interrupted_tool_calls`, `gate.recover_pending`), and wires `on_message` (the turn loop),
+  `on_upload` (the synchronous index build), `resolve_approval` (`gate.resolve`), and
+  `emergency_stop` (`M112` at the bound printer). Live providers still needing the maintainer: the
+  KB document is not auto-ingested (a `KbIngester` is constructed and `assemble_view` serves any
+  printer already in the store, but the watcher/ingest loop and the live Moonraker config provider
+  are not run here yet), and the persistent printer WebSocket subscription is not wired.
+- **[build] Keeping the SDK out of `bazel test`.** `claude-agent-sdk` and its full transitive
+  closure are locked in `requirements.lock.txt`, but every `claude_agent_sdk` import is lazy (inside
+  functions), so no library carries a Bazel dependency on it. Only `//printer_debugger:main` (the
+  py_binary, for the image) declares `@pypi//claude_agent_sdk`. `.bazelrc` adds
+  `test --build_tests_only`, so `bazel test //...` builds only test targets and their deps — not
+  `main` or `//:image` — and therefore never fetches the ~85 MB wheel. Verified two ways:
+  `bazel cquery 'somepath(kind(".*_test", //...), @pypi//claude_agent_sdk)'` is empty, and a full
+  `bazel test //...` run builds no OCI/image actions. `bazel build //:image` still builds the image
+  (and fetches the SDK) explicitly.
 
 ## Decisions taken during implementation
 

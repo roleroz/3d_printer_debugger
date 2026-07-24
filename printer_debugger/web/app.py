@@ -32,6 +32,9 @@ _STATIC_TYPES = {"app.js": "application/javascript", "styles.css": "text/css"}
 # on_message(session_id, content) enqueues a turn; emergency_stop(printer_id) fires M112.
 OnMessage = Callable[[str, list[Any]], Awaitable[None]]
 EmergencyStop = Callable[[str], None]
+# on_upload(artifact, body) builds and stores any index a just-uploaded file needs (a G-code
+# index synchronously; a .3mf is stored whole, mesh read on demand). The composition supplies it.
+OnUpload = Callable[[Any, bytes], None]
 
 
 @dataclass
@@ -43,6 +46,7 @@ class AppContext:
     hub: SseHub = field(default_factory=SseHub)
     resolve_approval: Callable[[str, bool, str], bool] = lambda *_: False
     on_message: OnMessage | None = None
+    on_upload: OnUpload | None = None
     emergency_stop: EmergencyStop | None = None
     artifacts: ArtifactStore | None = None
     max_upload_bytes: int = 500 * 1024 * 1024
@@ -143,9 +147,12 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
     @app.post("/sessions/{session_id}/messages")
     async def post_message(session_id: str, body: dict) -> dict:
         content = body.get("content") or [{"type": "text", "text": body.get("text", "")}]
-        store.add_message(session_id, MessageRole.USER, content)
+        # The turn loop persists the user message when a handler is wired; only persist here as a
+        # fallback (no agent), so the message is never written twice.
         if context.on_message is not None:
             await context.on_message(session_id, content)
+        else:
+            store.add_message(session_id, MessageRole.USER, content)
         return {"ok": True}
 
     @app.post("/sessions/{session_id}/files")
@@ -158,11 +165,15 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                 status_code=413,
             )
         content_type = request.headers.get("Content-Type", "application/octet-stream")
+        filename = request.headers.get("X-Filename", "")
         body = await request.body()
-        artifact = _store_upload(
-            context, session_id, body, _kind_for_content_type(content_type), content_type
-        )
-        return JSONResponse({"artifact_id": artifact.id, "size": len(body)})
+        kind = _kind_for_upload(filename, content_type)
+        artifact = _store_upload(context, session_id, body, kind, content_type)
+        # Build any index the file needs synchronously, while the request is still open
+        # ([decisions.md 2026-07-23]): a G-code index is stored now; a .3mf is stored whole.
+        if context.on_upload is not None:
+            context.on_upload(artifact, body)
+        return JSONResponse({"artifact_id": artifact.id, "size": len(body), "kind": kind.value})
 
     @app.post("/sessions/{session_id}/audio")
     async def upload_audio(session_id: str, request: Request) -> Response:
@@ -257,8 +268,17 @@ def _frame(event) -> str:
     return f"id: {event.id}\nevent: {event.kind}\ndata: {json.dumps(event.data)}\n\n"
 
 
-def _kind_for_content_type(content_type: str) -> ArtifactKind:
-    """Classify an uploaded blob by its declared content type for inline rendering."""
+def _kind_for_upload(filename: str, content_type: str) -> ArtifactKind:
+    """Classify an uploaded blob by its filename first, then its declared content type.
+
+    The slicer artifacts are distinguished by extension: ``.gcode``/``.g`` is G-code (which gets
+    an index), ``.3mf`` is a project. Photos and audio fall back to the content type.
+    """
+    lowered = filename.lower()
+    if lowered.endswith((".gcode", ".g", ".gco")):
+        return ArtifactKind.GCODE
+    if lowered.endswith(".3mf"):
+        return ArtifactKind.PROJECT
     if content_type.startswith("image/"):
         return ArtifactKind.PHOTO
     if content_type.startswith("audio/"):

@@ -56,6 +56,7 @@ class ClaudeAgentClient:
         resume_lookup: Callable[[str], str | None] = lambda _: None,
         model: str | None = None,
         effort: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> None:
         self._approve = approve
         self._build_servers = build_servers
@@ -63,6 +64,7 @@ class ClaudeAgentClient:
         self._resume_lookup = resume_lookup
         self._model = model
         self._effort = effort
+        self._env = env
 
     def _make_can_use_tool(self) -> Any:
         """Build the SDK ``can_use_tool`` callback wrapping :func:`permission_decision`."""
@@ -87,6 +89,7 @@ class ClaudeAgentClient:
             model=self._model,
             effort=self._effort,
             resume=self._resume_lookup(session_id),
+            env=self._env,
         )
         prompt = _content_to_prompt(user_content)
         async for message in query(prompt=prompt, options=options):

@@ -64,11 +64,14 @@ def build_options(
     model: str | None = None,
     effort: str | None = None,
     resume: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> Any:
     """Construct ``ClaudeAgentOptions`` (lazy import). Thinking is adaptive; unlisted tools deny.
 
     ``permission_mode='default'`` means a tool not in ``allowed_tools`` is routed to
-    ``can_use_tool`` — where the gate handles the write and everything else is denied.
+    ``can_use_tool`` — where the gate handles the write and everything else is denied. ``env``
+    carries the subscription OAuth token (``CLAUDE_CODE_OAUTH_TOKEN``) to the SDK explicitly, in
+    addition to it being present in the process environment.
     """
     from claude_agent_sdk import ClaudeAgentOptions, ThinkingConfigAdaptive
 
@@ -84,4 +87,5 @@ def build_options(
         thinking=ThinkingConfigAdaptive(),
         resume=resume,
         include_partial_messages=True,
+        env=env or {},
     )

@@ -311,7 +311,10 @@ three servers is a read. That is what makes the approval gate's job small enough
 - [x] **T4.4** Object map with per-layer bounding boxes, attributed by slicer object markers with
       geometric fallback.
 - [x] **T4.5** Anomaly detection.
-- [ ] **T4.6** Background index build with progress reporting and status.
+- [ ] **T4.6** Background index build with progress reporting and status. Superseded for the MVP by
+      the synchronous build inside the upload request ([decisions.md 2026-07-23]); the G-code index
+      is built and stored during `POST /sessions/{id}/files` at the composition root. On-demand /
+      background build is future work ([spec.md §14]); this box stays unchecked until then.
 - [x] **T5.1** Shared MCP response discipline: ceilings, bounded markers, narrowing guidance.
 - [x] **T5.2** `project` server tools.
 - [x] **T5.3** `gcode` server tools.

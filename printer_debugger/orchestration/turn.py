@@ -72,16 +72,19 @@ class TurnLoop:
         store: StructuredStore,
         client: AgentClient,
         forward_text: Callable[[str], None] = lambda _: None,
+        on_event: Callable[[AgentEvent], None] = lambda _: None,
     ) -> None:
         self._store = store
         self._client = client
         self._forward = forward_text
+        self._on_event = on_event
 
     async def run(self, session_id: str, user_content: list[Any]) -> None:
         """Run a single turn to completion, persisting everything as it happens."""
         self._store.add_message(session_id, MessageRole.USER, user_content)
         refs: dict[str, str] = {}
         async for event in self._client.run_turn(session_id, user_content):
+            self._on_event(event)
             self._handle(session_id, event, refs)
         self._store.touch_session(session_id)
 

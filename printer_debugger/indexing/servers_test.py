@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from printer_debugger.indexing import gcode, index_format, responses
+from printer_debugger.indexing import gcode, index_format, mcp, responses
 from printer_debugger.indexing.gcode_server import GcodeTools
 from printer_debugger.indexing.project_server import ProjectTools
 from printer_debugger.indexing.threemf import Project
@@ -112,6 +112,46 @@ class IndexFormatTest(unittest.TestCase):
             restored.layers[2].state_at_start.z, index.layers[2].state_at_start.z
         )
         self.assertTrue(index_format.is_current(index_format.dumps(index)))
+
+
+class McpAdapterTest(unittest.TestCase):
+    """The SDK-MCP adapters derive input schemas and format results without the SDK."""
+
+    def test_schema_marks_required_and_optional_params(self) -> None:
+        """A method's required param has no default; an optional one is not in ``required``."""
+        tools = GcodeTools(gcode.build_index("G1 Z0.2\nG1 X1 Y1 E1\n"), "G1 Z0.2\nG1 X1 Y1 E1\n")
+        schema = mcp.input_schema(tools.get_commands)
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("line", schema["properties"])
+        self.assertEqual(schema["properties"]["line"]["type"], "integer")
+        self.assertIn("line", schema["required"])
+        self.assertNotIn("window", schema.get("required", []))
+
+    def test_schema_maps_optional_union_type(self) -> None:
+        """A ``float | None`` parameter maps to a numeric JSON type and is not required."""
+        tools = GcodeTools(gcode.build_index("G1 Z0.2\nG1 X1 Y1 E1\n"), "G1 Z0.2\nG1 X1 Y1 E1\n")
+        schema = mcp.input_schema(tools.locate)
+        self.assertEqual(schema["properties"]["z"]["type"], "number")
+        self.assertNotIn("required", schema)
+
+    def test_tool_methods_excludes_privates(self) -> None:
+        """Only public, callable methods are exposed as tools."""
+        tools = GcodeTools(gcode.build_index("G1 Z0.2\nG1 X1 Y1 E1\n"), "G1 Z0.2\nG1 X1 Y1 E1\n")
+        names = mcp.tool_methods(tools)
+        self.assertIn("get_header", names)
+        self.assertFalse(any(name.startswith("_") for name in names))
+
+    def test_format_result_wraps_as_text_content(self) -> None:
+        """A dict result is serialised into a single MCP text-content block."""
+        formatted = mcp.format_result({"count": 3})
+        self.assertEqual(formatted["content"][0]["type"], "text")
+        self.assertIn("count", formatted["content"][0]["text"])
+
+    def test_format_error_carries_narrowing_guidance(self) -> None:
+        """A ToolError becomes an error result whose text includes its narrowing hint."""
+        formatted = mcp.format_error(responses.ToolError("too big", "narrow it"))
+        self.assertTrue(formatted["is_error"])
+        self.assertIn("narrow it", formatted["content"][0]["text"])
 
 
 if __name__ == "__main__":

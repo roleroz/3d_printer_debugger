@@ -280,7 +280,9 @@ crash must never resolve to an approval.
 - [x] **T3.1** Session lifecycle: create, name, rename, close, reopen, list.
 - [x] **T3.2** Printer binding: detection from project identity, prompting, reassignment with
       history, mismatch as a finding.
-- [ ] **T4.1** Agent client configuration, including all four permission mechanisms.
+- [x] **T4.1** Agent client configuration, including all four permission mechanisms, wired
+      end-to-end: per-session in-process MCP servers, `build_prompt`, and the `approve` bridge to
+      the gate ([composition.py]).
 - [x] **T4.2** System prompt assembly with stable-first ordering.
 - [ ] **T4.3** Web-fetch address restriction: refuse loopback, private, and link-local addresses,
       by SDK configuration or a fetch proxy, so it cannot reach the printer LAN.
@@ -290,4 +292,6 @@ crash must never resolve to an approval.
       decision, recording.
 - [x] **T6.2** Timeout handling with an injectable clock.
 - [x] **T6.3** Crash-safety: pending proposals resolve to denial on restart.
-- [ ] **T7.1** Client lifecycle: release on idle, resume on return, replay when resume fails.
+- [ ] **T7.1** Client lifecycle: release on idle, resume on return, replay when resume fails. The
+      resume seam is wired (`resume_lookup` reads the stored `sdk_session_id`); idle release and
+      replay-on-resume-failure remain, needing the live SDK to settle their fidelity.
