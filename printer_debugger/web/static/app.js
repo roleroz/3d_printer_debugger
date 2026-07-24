@@ -379,9 +379,32 @@
   let audioChunks = [];
   let audioCapTimer = null;
 
+  function disableMic(button, message) {
+    // The button stays clickable so the reason is explained on tap, but reads as disabled.
+    button.classList.add("disabled");
+    button.setAttribute("aria-disabled", "true");
+    button.addEventListener("click", () => appendMessage("system", message));
+  }
+
   function wireMic(sessionId) {
     const button = document.getElementById("mic-btn");
-    if (!button || !navigator.mediaDevices || !window.MediaRecorder) return;
+    if (!button) return;
+    // getUserMedia/MediaRecorder are exposed only in a secure context (HTTPS or localhost). On a
+    // plain http:// LAN origin navigator.mediaDevices is undefined, so explain rather than die.
+    const media = navigator.mediaDevices;
+    if (!window.isSecureContext || !media || !media.getUserMedia) {
+      disableMic(
+        button,
+        "Voice recording needs a secure (HTTPS) connection. You're on an insecure http:// " +
+          "origin, so the browser blocked the microphone. Reload the page over https:// " +
+          "(accept the one-time certificate warning) to record."
+      );
+      return;
+    }
+    if (!window.MediaRecorder) {
+      disableMic(button, "This browser doesn't support audio recording (MediaRecorder).");
+      return;
+    }
     button.addEventListener("click", async () => {
       if (mediaRecorder && mediaRecorder.state === "recording") {
         stopRecording();

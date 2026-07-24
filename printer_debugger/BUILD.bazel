@@ -40,6 +40,7 @@ py_binary(
         "//printer_debugger/store",
         "//printer_debugger/web",
         "@pypi//claude_agent_sdk",
+        "@pypi//cryptography",
         "@pypi//faster_whisper",
         "@pypi//uvicorn",
     ],

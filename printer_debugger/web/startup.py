@@ -11,38 +11,53 @@ import re
 import socket
 
 
-def reachable_urls(port: int, bound_host: str = "0.0.0.0") -> list[str]:
+def reachable_urls(port: int, bound_host: str = "0.0.0.0", scheme: str = "http") -> list[str]:
     """Return the URLs a phone could use to reach the server, or a loopback-only note."""
+    loopback_note = "  (loopback only — not reachable from your phone)"
     if bound_host not in ("0.0.0.0", "::", ""):
         if _is_loopback(bound_host):
-            return [f"http://{bound_host}:{port}  (loopback only — not reachable from your phone)"]
-        return [f"http://{bound_host}:{port}"]
+            return [f"{scheme}://{bound_host}:{port}{loopback_note}"]
+        return [f"{scheme}://{bound_host}:{port}"]
     addresses = _local_addresses()
     if not addresses:
-        return [f"http://127.0.0.1:{port}  (loopback only — not reachable from your phone)"]
-    return [f"http://{address}:{port}" for address in addresses]
+        return [f"{scheme}://127.0.0.1:{port}{loopback_note}"]
+    return [f"{scheme}://{address}:{port}" for address in addresses]
 
 
 def format_banner(
-    port: int, bound_host: str = "0.0.0.0", advertise_host: str | None = None
+    port: int,
+    bound_host: str = "0.0.0.0",
+    advertise_host: str | None = None,
+    *,
+    tls: bool = False,
+    self_signed: bool = False,
 ) -> str:
     """A human banner listing where the UI is available.
 
     ``advertise_host`` overrides auto-detection — needed inside a container, whose own addresses
     (the Docker bridge) are not reachable from a phone. When detecting, a hint explains the
-    override for exactly that case.
+    override for exactly that case. ``tls`` switches the printed scheme to ``https``; when the
+    HTTPS cert is self-signed, a line explains the one-time certificate warning the phone shows.
     """
+    scheme = "https" if tls else "http"
     lines = ["3D Printer Debugger is available at:"]
     if advertise_host:
-        lines.append(f"  http://{advertise_host}:{port}")
-        return "\n".join(lines)
-    urls = reachable_urls(port, bound_host)
-    lines.extend(f"  {url}" for url in urls)
-    if _looks_containerised(urls):
+        lines.append(f"  {scheme}://{advertise_host}:{port}")
+    else:
+        urls = reachable_urls(port, bound_host, scheme)
+        lines.extend(f"  {url}" for url in urls)
+        if _looks_containerised(urls):
+            lines.append("")
+            lines.append(
+                "  NOTE: that looks like a container-internal address your phone cannot reach. "
+                "Set PD_ADVERTISE_HOST to the host's LAN IP, or run the container with "
+                "--network host."
+            )
+    if tls and self_signed:
         lines.append("")
         lines.append(
-            "  NOTE: that looks like a container-internal address your phone cannot reach. "
-            "Set PD_ADVERTISE_HOST to the host's LAN IP, or run the container with --network host."
+            "  NOTE: this uses a self-signed certificate — your phone will show a one-time "
+            "security warning; accept it once to enable microphone recording."
         )
     return "\n".join(lines)
 

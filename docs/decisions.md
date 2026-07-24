@@ -909,3 +909,24 @@ required at startup) inside the extraction module, so `KbIngester`/`main.py` sig
 unchanged. The exact SDK mechanism for strict-JSON output (`output_format` json-schema vs. a
 JSON-tool call read back from the result) is to be confirmed against the installed
 `claude-agent-sdk` 0.2.126 during implementation.
+
+## 2026-07-23 — Self-signed HTTPS for secure-context browser APIs
+
+**Decision:** The server serves HTTPS by default with a self-signed certificate it generates on
+first run (`printer_debugger/web/tls.py`, using `cryptography`). The cert/key are resolved from the
+environment: `PD_TLS=off` keeps plain HTTP; `PD_TLS_CERT`+`PD_TLS_KEY` (both set) supply an external
+pair used as-is; otherwise an auto pair is generated under `<data_dir>/tls/` and reused across
+restarts (the data dir is the mounted volume, so the cert survives). The cert's subjectAltName
+covers the advertised/bound LAN address plus `localhost`/`127.0.0.1`/`::1`. `main.py` passes
+`ssl_certfile`/`ssl_keyfile` to `uvicorn.run`; `--check` neither generates a cert nor serves.
+
+**Why:** Browsers expose `getUserMedia`/`MediaRecorder` only in a secure context (HTTPS or
+`localhost`). Users open the app from a phone at `http://<laptop-ip>:8080` — an insecure origin — so
+`navigator.mediaDevices` was `undefined` and the mic button was silently dead (the camera works
+because it is a plain `<input capture>` file picker needing no secure context). Serving HTTPS
+restores the secure context; a self-signed cert avoids any CA/DNS dependency for a LAN-only tool.
+The trade-off is a one-time certificate warning the user accepts on the phone, after which mic
+recording works. The mic button now also explains this in-app rather than failing silently.
+
+**iOS note:** the SAN must contain the IP address itself (as an `IPAddress` entry), or iOS Safari
+rejects the cert regardless of the warning prompt.

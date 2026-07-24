@@ -23,6 +23,7 @@ from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode, resolve_mode
 from printer_debugger.web.sse import SseHub
 from printer_debugger.web.startup import format_banner
+from printer_debugger.web.tls import ensure_self_signed, resolve_tls, tls_hostnames
 from printer_debugger.web.transcription import Transcriber
 
 # Where the hermetically bundled faster-whisper ``base`` model is placed in the image
@@ -105,17 +106,39 @@ def main() -> int:
     context, _ = build(args.data_dir)
     app = create_app(context)
     if args.check:
+        # --check must not generate a cert or serve; it only proves the app builds.
         print("printer_debugger: build check OK")
         return 0
 
+    # Serve HTTPS by default so browsers grant a secure context for mic recording; the cert
+    # persists under the data dir so it survives restarts ([decisions.md 2026-07-23]).
+    tls = resolve_tls(os.environ, args.data_dir)
+    if tls is not None and tls.auto:
+        ensure_self_signed(tls.cert_path, tls.key_path, tls_hostnames(os.environ))
+
     print(
-        format_banner(args.port, args.host, os.environ.get("PD_ADVERTISE_HOST")), flush=True
+        format_banner(
+            args.port,
+            args.host,
+            os.environ.get("PD_ADVERTISE_HOST"),
+            tls=tls is not None,
+            self_signed=tls is not None and tls.auto,
+        ),
+        flush=True,
     )
     import uvicorn
 
     # The app's lifespan shutdown closes the SSE hub so every stream returns; this bounded
     # graceful-shutdown timeout is a backstop in case any connection is still draining.
-    uvicorn.run(app, host=args.host, port=args.port, timeout_graceful_shutdown=5)
+    run_kwargs: dict[str, object] = {
+        "host": args.host,
+        "port": args.port,
+        "timeout_graceful_shutdown": 5,
+    }
+    if tls is not None:
+        run_kwargs["ssl_certfile"] = tls.cert_path
+        run_kwargs["ssl_keyfile"] = tls.key_path
+    uvicorn.run(app, **run_kwargs)
     return 0
 
 

@@ -9,6 +9,7 @@ py_library(
         "sse.py",
         "startup.py",
         "templates.py",
+        "tls.py",
         "transcription.py",
     ],
     data = glob(["static/*"]),
@@ -27,6 +28,19 @@ py_test(
     size = "small",
     srcs = ["units_test.py"],
     deps = [":web"],
+)
+
+# cryptography is only pulled by the TLS cert-generation path, so its dependency stays on this
+# target (and //printer_debugger:main) rather than the shared :web library, keeping the rest of
+# the suite from fetching it. ensure_self_signed imports it lazily, so :web needs no such dep.
+py_test(
+    name = "tls_test",
+    size = "small",
+    srcs = ["tls_test.py"],
+    deps = [
+        ":web",
+        "@pypi//cryptography",
+    ],
 )
 
 py_test(

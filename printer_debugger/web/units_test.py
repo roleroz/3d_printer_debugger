@@ -177,6 +177,34 @@ class StartupTest(unittest.TestCase):
         self.assertTrue(startup._looks_containerised(["http://172.17.0.2:8080"]))
         self.assertFalse(startup._looks_containerised(["http://192.168.1.42:8080"]))
 
+    def test_http_scheme_by_default(self) -> None:
+        """Without TLS the banner and reachable URLs use the plain http scheme."""
+        banner = startup.format_banner(8080, "192.168.1.42")
+        self.assertIn("http://192.168.1.42:8080", banner)
+        self.assertNotIn("https://", banner)
+
+    def test_https_scheme_when_tls_on(self) -> None:
+        """With TLS on, the banner advertises https URLs."""
+        banner = startup.format_banner(8080, "192.168.1.42", tls=True)
+        self.assertIn("https://192.168.1.42:8080", banner)
+        self.assertNotIn("http://192.168.1.42:8080", banner)
+
+    def test_self_signed_warning_only_under_tls(self) -> None:
+        """The one-time certificate-warning line appears only for a self-signed HTTPS cert."""
+        plain = startup.format_banner(8080, "192.168.1.42")
+        self.assertNotIn("self-signed", plain)
+        secure = startup.format_banner(8080, "192.168.1.42", tls=True, self_signed=True)
+        self.assertIn("self-signed", secure)
+        self.assertIn("certificate", secure)
+
+    def test_advertise_host_uses_https_and_warning(self) -> None:
+        """An advertised host renders https and carries the self-signed warning when TLS is on."""
+        banner = startup.format_banner(
+            8080, "0.0.0.0", advertise_host="192.168.1.42", tls=True, self_signed=True
+        )
+        self.assertIn("https://192.168.1.42:8080", banner)
+        self.assertIn("self-signed", banner)
+
 
 if __name__ == "__main__":
     unittest.main()

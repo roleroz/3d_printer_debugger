@@ -156,6 +156,21 @@ design. It is maintained across the module commits on the `feature/implementatio
   long-lived SSE streams, and dumped `CancelledError` on shutdown. Replaced with `AuthCsrfMiddleware`
   (raw ASGI, inspects only scope headers) so request/response byte streams flow straight through
   uvicorn. Auth/CSRF behaviour is unchanged and covered by the existing 401/403/allowed tests.
+- **[web] Self-signed HTTPS is on by default so browser mic recording works over the LAN.**
+  `getUserMedia`/`MediaRecorder` are exposed only in a secure context (HTTPS or `localhost`), so a
+  phone hitting `http://<laptop-ip>:8080` had a silently dead mic button. `web/tls.py` resolves the
+  cert/key from the environment (`resolve_tls`, a pure function) and generates a self-signed pair
+  (`ensure_self_signed`, `cryptography` imported lazily). Env contract: `PD_TLS=off` forces plain
+  HTTP; `PD_TLS_CERT`+`PD_TLS_KEY` (both set) use those files as-is; otherwise an auto pair is
+  generated at `<data_dir>/tls/cert.pem`+`key.pem`. The cert lives under the mounted data dir, so it
+  persists across restarts (regenerated only if absent). Its SAN includes the `PD_ADVERTISE_HOST`/
+  `PD_HOST` addresses plus `localhost`/`127.0.0.1`/`::1` (IPs as `IPAddress` entries — iOS requires
+  the address in the SAN). `main.py` passes `ssl_certfile`/`ssl_keyfile` to `uvicorn.run`; `--check`
+  neither generates a cert nor serves. Access becomes `https://<ip>:8080`, and the phone must accept
+  a one-time certificate warning before the mic works. `cryptography` (already locked) is depended on
+  only by `//printer_debugger:main` and the `tls_test` target, staying out of the rest of the suite.
+  The mic button no longer dies silently on an insecure origin: `wireMic` in `app.js` attaches a
+  handler that posts a system message explaining the HTTPS requirement (or missing `MediaRecorder`).
 - **[web] Still deferred in the UI shell:** real printer-strip data (the strip is structured with
   `data-field` hooks and shows placeholder temps/status until the printer client publishes onto the
   session stream); and true streamed uploads with post-upload type validation (the body is currently
