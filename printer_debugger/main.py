@@ -16,8 +16,9 @@ import os
 
 from printer_debugger import composition
 from printer_debugger.kb.ingester import KbIngester
-from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
+from printer_debugger.store.artifact_store import ArtifactStore, LocalFilesystemArtifactStore
 from printer_debugger.store.db import Database
+from printer_debugger.store.models import Artifact
 from printer_debugger.store.structured_store import StructuredStore
 from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode, resolve_mode
@@ -29,6 +30,14 @@ from printer_debugger.web.transcription import Transcriber
 # Where the hermetically bundled faster-whisper ``base`` model is placed in the image
 # (see //:whisper_model_layer); overridable for local runs via PD_WHISPER_MODEL_DIR.
 _DEFAULT_WHISPER_MODEL_DIR = "/app/whisper-base"
+
+
+def _on_upload(
+    store: StructuredStore, artifacts: ArtifactStore, artifact: Artifact, body: bytes
+) -> None:
+    """Build the file index for an upload, then attempt printer auto-detection from a ``.3mf``."""
+    composition.build_index_for_upload(store, artifacts, artifact, body)
+    composition.auto_bind_from_project(store, artifacts, artifact, body)
 
 
 def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
@@ -69,9 +78,7 @@ def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
         hub=hub,
         artifacts=artifacts,
         on_message=composition.make_on_message(store, hub, client_factory),
-        on_upload=lambda artifact, body: composition.build_index_for_upload(
-            store, artifacts, artifact, body
-        ),
+        on_upload=lambda artifact, body: _on_upload(store, artifacts, artifact, body),
         ingest_kb=lambda text: kb.ingest(text),
         resolve_approval=gate.resolve,
         emergency_stop=composition.make_emergency_stop(store),

@@ -20,7 +20,14 @@ from printer_debugger.orchestration import turn
 from printer_debugger.printer.danger import Classification
 from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
 from printer_debugger.store.db import Database
-from printer_debugger.store.models import ApprovalDecision, ArtifactKind, TokenUsage
+from printer_debugger.store.models import (
+    ApprovalDecision,
+    Artifact,
+    ArtifactKind,
+    BindingReason,
+    PrinterStatus,
+    TokenUsage,
+)
 from printer_debugger.store.structured_store import StructuredStore
 from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode
@@ -181,6 +188,123 @@ class LoadProjectToolsTest(_StoreFixture):
         self.assertIsNone(
             composition.load_project_tools(self.store, self.artifacts, session.id)
         )
+
+
+class AutoBindFromProjectTest(_StoreFixture):
+    """auto_bind_from_project binds a session to a matching printer, conservatively and once."""
+
+    def _seed_printer(self, name: str) -> str:
+        """Create a known printer with the given name and return its id."""
+        return self.store.create_printer(
+            name=name,
+            kb_section="## " + name,
+            kb_content_hash="hash-" + name,
+            status=PrinterStatus.COMPLETE,
+            address="http://printer.local",
+        ).id
+
+    def _project_artifact(self, session_id: str) -> tuple[Artifact, bytes]:
+        """Store the real .3mf fixture as a PROJECT artifact and return it with its bytes."""
+        data = _PROJECT_3MF.read_bytes()
+        blob_key = f"sessions/{session_id}/project.3mf"
+        self.artifacts.put(blob_key, io.BytesIO(data))
+        artifact = self.store.add_artifact(
+            session_id=session_id,
+            kind=ArtifactKind.PROJECT,
+            blob_key=blob_key,
+            size_bytes=len(data),
+            content_type="application/octet-stream",
+        )
+        return artifact, data
+
+    def test_single_printer_binds_detected(self) -> None:
+        """One known printer plus a .3mf upload auto-binds it with reason DETECTED."""
+        printer_id = self._seed_printer("Some Other Printer")
+        session = self.store.create_session(name="s")
+        artifact, body = self._project_artifact(session.id)
+        bound = composition.auto_bind_from_project(
+            self.store, self.artifacts, artifact, body
+        )
+        self.assertEqual(bound, printer_id)
+        self.assertEqual(self.store.get_session(session.id).printer_id, printer_id)
+        bindings = self.store.list_bindings(session.id)
+        self.assertEqual(bindings[-1].reason, BindingReason.DETECTED)
+
+    def test_multiple_printers_one_match_binds_match(self) -> None:
+        """With several printers, only the name-matching one binds; the others are left."""
+        match_id = self._seed_printer("Voron v2")
+        other_id = self._seed_printer("Prusa MK4")
+        session = self.store.create_session(name="s")
+        artifact, body = self._project_artifact(session.id)
+        bound = composition.auto_bind_from_project(
+            self.store, self.artifacts, artifact, body
+        )
+        self.assertEqual(bound, match_id)
+        self.assertEqual(self.store.get_session(session.id).printer_id, match_id)
+        self.assertNotEqual(bound, other_id)
+
+    def test_multiple_printers_no_match_leaves_unbound(self) -> None:
+        """With several printers and none matching the identity, nothing binds."""
+        self._seed_printer("Prusa MK4")
+        self._seed_printer("Bambu X1C")
+        session = self.store.create_session(name="s")
+        artifact, body = self._project_artifact(session.id)
+        bound = composition.auto_bind_from_project(
+            self.store, self.artifacts, artifact, body
+        )
+        self.assertIsNone(bound)
+        self.assertIsNone(self.store.get_session(session.id).printer_id)
+
+    def test_existing_binding_not_overwritten(self) -> None:
+        """A session already bound to a printer is left untouched by auto-detection."""
+        chosen_id = self._seed_printer("Voron v2")
+        session = self.store.create_session(name="s")
+        self.store.bind_printer(session.id, chosen_id, BindingReason.CHOSEN)
+        artifact, body = self._project_artifact(session.id)
+        bound = composition.auto_bind_from_project(
+            self.store, self.artifacts, artifact, body
+        )
+        self.assertIsNone(bound)
+        self.assertEqual(self.store.get_session(session.id).printer_id, chosen_id)
+        self.assertEqual(len(self.store.list_bindings(session.id)), 1)
+
+    def test_non_project_artifact_returns_none(self) -> None:
+        """A non-PROJECT artifact (e.g. a photo) yields no binding and returns None."""
+        self._seed_printer("Voron v2")
+        session = self.store.create_session(name="s")
+        blob_key = f"sessions/{session.id}/photo.jpg"
+        self.artifacts.put(blob_key, io.BytesIO(b"\xff\xd8jpeg"))
+        artifact = self.store.add_artifact(
+            session_id=session.id,
+            kind=ArtifactKind.PHOTO,
+            blob_key=blob_key,
+            size_bytes=5,
+            content_type="image/jpeg",
+        )
+        bound = composition.auto_bind_from_project(
+            self.store, self.artifacts, artifact, b"\xff\xd8jpeg"
+        )
+        self.assertIsNone(bound)
+        self.assertIsNone(self.store.get_session(session.id).printer_id)
+
+    def test_malformed_body_does_not_raise(self) -> None:
+        """A malformed/empty .3mf body is swallowed: no exception, no binding, returns None."""
+        self._seed_printer("Voron v2")
+        session = self.store.create_session(name="s")
+        blob_key = f"sessions/{session.id}/project.3mf"
+        self.artifacts.put(blob_key, io.BytesIO(b""))
+        artifact = self.store.add_artifact(
+            session_id=session.id,
+            kind=ArtifactKind.PROJECT,
+            blob_key=blob_key,
+            size_bytes=0,
+            content_type="application/octet-stream",
+        )
+        bound = composition.auto_bind_from_project(
+            self.store, self.artifacts, artifact, b""
+        )
+        self.assertIsNone(bound)
+        self.assertIsNone(self.store.get_session(session.id).printer_id)
 
 
 class RenderSinkTest(_StoreFixture):

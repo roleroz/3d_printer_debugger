@@ -16,6 +16,8 @@ approved path, so a command is submitted exactly once.
 from __future__ import annotations
 
 import io
+import logging
+import re
 import uuid
 from collections.abc import Mapping
 from typing import Any, Awaitable, Callable
@@ -31,9 +33,17 @@ from .orchestration.sdk_client import ClaudeAgentClient
 from .orchestration.turn import AgentEvent, TextEvent, ToolStartEvent, TurnLoop
 from .procedures import catalog as procedures_catalog
 from .store.artifact_store import ArtifactStore, artifact_key, index_key
-from .store.models import ApprovalDecision, Artifact, ArtifactKind, FileIndexKind
+from .store.models import (
+    ApprovalDecision,
+    Artifact,
+    ArtifactKind,
+    BindingReason,
+    FileIndexKind,
+)
 from .store.structured_store import StructuredStore
 from .web.sse import SseHub
+
+_LOG = logging.getLogger(__name__)
 
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 DEFAULT_MODEL = "claude-opus-4-8"
@@ -96,6 +106,75 @@ def build_index_for_upload(
         blob_key=key,
         format_version=index.format_version,
     )
+
+
+def auto_bind_from_project(
+    store: StructuredStore, artifacts: ArtifactStore, artifact: Artifact, body: bytes
+) -> str | None:
+    """Auto-bind the session to a known printer from an uploaded ``.3mf``'s printer identity.
+
+    Runs on a ``.3mf`` upload and, conservatively, binds the session to a matching known printer
+    with reason ``DETECTED``. An existing binding (user-chosen or previously detected) is never
+    overwritten, and an ambiguous match is left for the manual picker. Any failure is logged and
+    swallowed — detection must never break the upload. Returns the bound printer id, or None.
+    """
+    if artifact.kind is not ArtifactKind.PROJECT:
+        return None
+    try:
+        session = store.get_session(artifact.session_id)
+        if session is None or session.printer_id is not None:
+            return None  # never auto-rebind over an existing/user binding.
+        identity = _project_identity_string(body)
+        if not identity:
+            return None
+        printer_id = _match_printer(store.list_printers(), identity)
+        if printer_id is None:
+            return None
+        store.bind_printer(artifact.session_id, printer_id, BindingReason.DETECTED)
+        return printer_id
+    except Exception:  # a detection failure must never break the upload.
+        _LOG.exception("auto_bind_from_project failed for session %s", artifact.session_id)
+        return None
+
+
+def _project_identity_string(body: bytes) -> str | None:
+    """Extract the project's most descriptive printer identity string from ``.3mf`` bytes."""
+    project = Project.from_bytes(body)
+    tools = ProjectTools(project)
+    identity = tools.get_printer_identity()
+    value = identity.get("printer_settings_id")
+    if not value:
+        value = tools.get_settings(key="printer_settings_id").get("value")
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return str(value) if value else None
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip everything non-alphanumeric, for tolerant name matching."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _match_printer(printers: list[Any], identity: str) -> str | None:
+    """Pick the one printer that matches ``identity``, conservatively, or None if ambiguous.
+
+    One printer binds unconditionally (the reliable common case). With several, a printer is a
+    candidate when its normalized name is a substring of the normalized identity, or vice-versa;
+    only an unambiguous single candidate binds.
+    """
+    if len(printers) == 1:
+        return printers[0].id
+    normalized_identity = _normalize(identity)
+    if not normalized_identity:
+        return None
+    candidates = []
+    for printer in printers:
+        normalized_name = _normalize(printer.name)
+        if not normalized_name:
+            continue
+        if normalized_name in normalized_identity or normalized_identity in normalized_name:
+            candidates.append(printer.id)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def load_gcode_tools(
