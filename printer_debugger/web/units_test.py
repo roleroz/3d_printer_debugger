@@ -112,6 +112,17 @@ class StartupTest(unittest.TestCase):
         banner = startup.format_banner(8080, "127.0.0.1")
         self.assertIn("available at", banner)
 
+    def test_advertise_host_overrides_detection(self) -> None:
+        """PD_ADVERTISE_HOST is used verbatim, for the container case where detection is wrong."""
+        banner = startup.format_banner(8080, "0.0.0.0", advertise_host="192.168.1.42")
+        self.assertIn("http://192.168.1.42:8080", banner)
+        self.assertNotIn("NOTE", banner)
+
+    def test_container_bridge_address_triggers_hint(self) -> None:
+        """A Docker-bridge address triggers the PD_ADVERTISE_HOST / --network host hint."""
+        self.assertTrue(startup._looks_containerised(["http://172.17.0.2:8080"]))
+        self.assertFalse(startup._looks_containerised(["http://192.168.1.42:8080"]))
+
 
 if __name__ == "__main__":
     unittest.main()

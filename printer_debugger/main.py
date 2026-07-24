@@ -56,7 +56,9 @@ def main() -> int:
         print("printer_debugger: build check OK")
         return 0
 
-    print(format_banner(args.port, args.host), flush=True)
+    print(
+        format_banner(args.port, args.host, os.environ.get("PD_ADVERTISE_HOST")), flush=True
+    )
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port)

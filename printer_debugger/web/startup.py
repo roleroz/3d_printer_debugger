@@ -7,6 +7,7 @@ guessed at. If bound to loopback only, that is stated plainly.
 
 from __future__ import annotations
 
+import re
 import socket
 
 
@@ -22,12 +23,37 @@ def reachable_urls(port: int, bound_host: str = "0.0.0.0") -> list[str]:
     return [f"http://{address}:{port}" for address in addresses]
 
 
-def format_banner(port: int, bound_host: str = "0.0.0.0") -> str:
-    """A human banner listing where the UI is available."""
-    urls = reachable_urls(port, bound_host)
+def format_banner(
+    port: int, bound_host: str = "0.0.0.0", advertise_host: str | None = None
+) -> str:
+    """A human banner listing where the UI is available.
+
+    ``advertise_host`` overrides auto-detection — needed inside a container, whose own addresses
+    (the Docker bridge) are not reachable from a phone. When detecting, a hint explains the
+    override for exactly that case.
+    """
     lines = ["3D Printer Debugger is available at:"]
+    if advertise_host:
+        lines.append(f"  http://{advertise_host}:{port}")
+        return "\n".join(lines)
+    urls = reachable_urls(port, bound_host)
     lines.extend(f"  {url}" for url in urls)
+    if _looks_containerised(urls):
+        lines.append("")
+        lines.append(
+            "  NOTE: that looks like a container-internal address your phone cannot reach. "
+            "Set PD_ADVERTISE_HOST to the host's LAN IP, or run the container with --network host."
+        )
     return "\n".join(lines)
+
+
+def _looks_containerised(urls: list[str]) -> bool:
+    """Whether every detected URL is a Docker bridge address (172.16–172.31.x)."""
+    for url in urls:
+        match = re.search(r"://(\d+)\.(\d+)\.", url)
+        if match is None or not (int(match.group(1)) == 172 and 16 <= int(match.group(2)) <= 31):
+            return False
+    return bool(urls)
 
 
 def _is_loopback(host: str) -> bool:

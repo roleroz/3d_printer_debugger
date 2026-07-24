@@ -26,8 +26,23 @@ dependencies — onto `debian:12-slim` (pinned by digest).
 ```bash
 bazel build //:image          # build the OCI image
 bazel run //:load             # load it into the local Docker daemon as printer-debugger:latest
-docker run --rm -p 8080:8080 -v /srv/printer-debugger:/data printer-debugger:latest
+docker run --rm -p 8080:8080 \
+  -e PD_ADVERTISE_HOST=$(hostname -I | awk '{print $1}') \
+  -v /srv/printer-debugger:/data printer-debugger:latest
 ```
+
+### Reaching it from a phone
+
+Inside a container the process cannot see the host's LAN address — it only sees the Docker bridge
+IP (`172.17.x.x`), which a phone cannot reach. The published port (`-p 8080:8080`) *is* reachable
+at the host's LAN IP, so either:
+
+- **Set `PD_ADVERTISE_HOST`** to the host's LAN IP (as above) so the startup banner prints the URL
+  your phone should open; or
+- **Run with `--network host`** (Linux) so the container sees the host's real interfaces and
+  detects the LAN IP itself.
+
+Without either, the banner prints the container-internal address and adds a note saying so.
 
 The container prints every reachable URL on startup (never localhost). Configuration is via the
 environment:
@@ -39,6 +54,7 @@ environment:
 | `PD_ALLOWED_ORIGIN` | — | Allowed origin for the CSRF check, required in exposed mode |
 | `PD_PORT` | `8080` | Listen port |
 | `PD_DATA_DIR` | `/data` | Where the SQLite database and artifacts live (mount a volume) |
+| `PD_ADVERTISE_HOST` | — | Host/IP for the startup banner (set to the host LAN IP under Docker) |
 
 Secrets (the model API key, the OIDC client secret) come from the environment only, never the
 image.
