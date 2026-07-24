@@ -60,10 +60,18 @@ design. It is maintained across the module commits on the `feature/implementatio
   the KB `LiveConfigProvider` seam; calling `import_live_config` during ingest is wired at the
   composition root.
 
-- **[orchestration] The Agent-SDK adapter is not implemented (T4.1, T7.1).** The turn loop
-  (`turn.py`) drives an `AgentClient` seam and is fully tested with a fake client; the concrete
-  adapter that wraps `claude-agent-sdk` (agent configuration with the four permission mechanisms,
-  streaming, client release/resume/replay) is deferred and wired at the composition root.
+- **[orchestration] The Agent-SDK adapter's core is built and tested; end-to-end wiring remains
+  (T4.1, T7.1).** `sdk_config.py` (the four permission mechanisms — allow/deny tool lists, deny-
+  unlisted, the gated write), `sdk_translate.py` (SDK message → `AgentEvent`), and the permission
+  decision in `sdk_client.py` (gate the write, deny unlisted, never ask about a denied tool) are
+  **hermetically tested** without pulling the 273 MB SDK. `ClaudeAgentClient.run_turn` drives
+  `claude-agent-sdk` (lazy import; live path). **Remaining before conversations work end-to-end:**
+  (1) add `claude-agent-sdk` to `requirements.lock.txt` and make `//printer_debugger:main` depend
+  on it so the image carries it (the ~273 MB lands only in the image, not `bazel test //...`);
+  (2) build the per-session in-process MCP servers by wrapping `ProjectTools`/`GcodeTools`/
+  `PrinterTools` with `create_sdk_mcp_server`, and wire `build_servers`/`build_prompt`/`approve`
+  (approve → the `ApprovalGate`) at the composition root; (3) a `manual` live test with subscription
+  credentials. Session resume/replay (T7.1) is the `resume=` seam, wired with (2).
 - **[orchestration] The web-fetch SSRF guard (T4.3) is not implemented here.** The design places
   the loopback/private/link-local refusal on web fetch; whether the SDK enforces it or a fetch
   proxy is needed is an open question. Left unchecked; must be added before enabling web fetch in a

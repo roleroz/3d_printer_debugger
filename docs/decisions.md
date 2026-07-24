@@ -771,3 +771,25 @@ works. OrcaSlicer, the assumed slicer, generates most of them directly; where it
 well-known generator or a community model link covers the rest. Referencing rather than
 redistributing keeps the repository free of third-party model licenses while still telling the user
 exactly what to print.
+
+## 2026-07-23 — Agent backend: claude-agent-sdk (Option A), on the Claude subscription
+
+**Decision:** The agent loop uses `claude-agent-sdk` (as the architecture specified), not the raw
+Anthropic API Tool Runner. It implements the orchestrator's `AgentClient` seam. Chosen over the
+Tool Runner specifically because `claude-agent-sdk` drives the Claude Code CLI, which can
+authenticate with a **Claude subscription** (OAuth login) rather than pay-per-token API billing —
+the raw API SDK has no subscription path. Its `can_use_tool` permission callback maps directly onto
+the approval gate, and `create_sdk_mcp_server` hosts our `project`/`gcode`/`printer` tool servers
+in-process.
+
+**Why / trade-offs made explicit:**
+- `claude-agent-sdk` bundles a ~273 MB self-contained native `claude` executable (no Node needed)
+  and runs the agent as a subprocess. That cost lands only in the container image, not the hermetic
+  test suite: the SDK dependency is fetched by Bazel only for targets that depend on it (the image
+  build and a `manual` live test), so `bazel test //...` stays lean.
+- The adapter is split so its security-critical config (allow/deny tool lists, permission mode) and
+  its message→event translation are pure and hermetically tested; the SDK-driving client is a lazy
+  import behind a `manual`/live test that needs subscription credentials.
+- Subscription auth fits the primary local-on-LAN mode (runs under `claude login`); a cloud
+  deployment would provision OAuth credentials into the container or fall back to an API key, and
+  automated subscription use should be checked against the plan's terms.
