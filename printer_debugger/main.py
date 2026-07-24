@@ -25,7 +25,7 @@ def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
     database = Database(os.path.join(data_dir, "printer_debugger.db"))
     database.migrate()
     store = StructuredStore(database)
-    LocalFilesystemArtifactStore(os.path.join(data_dir, "artifacts"))
+    artifacts = LocalFilesystemArtifactStore(os.path.join(data_dir, "artifacts"))
     mode = resolve_mode(os.environ.get("PD_AUTH_MODE", "local"))
     if mode is AuthMode.LOCAL:
         auth = AuthConfig(mode=AuthMode.LOCAL)
@@ -38,7 +38,7 @@ def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
             allowed_subjects=subjects,
             allowed_origin=os.environ.get("PD_ALLOWED_ORIGIN"),
         )
-    return AppContext(store=store, auth=auth), store
+    return AppContext(store=store, auth=auth, artifacts=artifacts), store
 
 
 def main() -> int:

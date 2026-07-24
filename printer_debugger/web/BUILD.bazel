@@ -8,7 +8,9 @@ py_library(
         "security.py",
         "sse.py",
         "startup.py",
+        "templates.py",
     ],
+    data = glob(["static/*"]),
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
@@ -29,6 +31,16 @@ py_test(
     name = "app_test",
     size = "small",
     srcs = ["app_test.py"],
+    deps = [
+        ":web",
+        "@pypi//httpx",
+    ],
+)
+
+py_test(
+    name = "ui_test",
+    size = "small",
+    srcs = ["ui_test.py"],
     deps = [
         ":web",
         "@pypi//httpx",

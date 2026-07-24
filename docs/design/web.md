@@ -238,12 +238,17 @@ backgrounds for thirty seconds loses part of an answer.
 - [x] **T8.2** CSRF defense on mutating routes: `SameSite` cookies plus an origin or per-session
       token check, refusing forged cross-site requests.
 - [x] **T9.1** Startup URL printing, all addresses, loopback labelled.
-- [ ] **T4.1** Session list page.
-- [ ] **T4.2** Session view: conversation rendering, attachments, printer strip.
+- [x] **T4.1** Session list page.
+- [x] **T4.2** Session view: conversation rendering, attachments, printer strip.
 - [x] **T3.2** SSE endpoint with per-session fan-out and position-based reconnect.
-- [ ] **T6.1** Streamed uploads with pre-body size check, progress, and type validation.
-- [ ] **T4.3** Composer JavaScript: camera capture, upload progress.
-- [ ] **T7.1** Audio recording, cap-and-submit behaviour, transcription handoff.
-- [ ] **T5.1** Approval interface, including refusal properties and multi-viewer resolution.
+- [ ] **T6.1** Streamed uploads with pre-body size check, progress, and type validation. (Size
+      pre-check and client-side progress are done; uploads are persisted to the artifact store, but
+      the whole body is still read into memory and post-upload type validation is not yet done.)
+- [x] **T4.3** Composer JavaScript: camera capture, upload progress.
+- [ ] **T7.1** Audio recording, cap-and-submit behaviour, transcription handoff. (Browser capture,
+      the two-minute cap, and upload to `POST /sessions/{id}/audio` are done and the clip is stored
+      with a "transcription pending" marker; the server-side Whisper transcription handoff is still
+      deferred.)
+- [x] **T5.1** Approval interface, including refusal properties and multi-viewer resolution.
 - [x] **T3.3** Emergency stop route and its always-present control.
-- [ ] **T4.4** Artifact serving.
+- [x] **T4.4** Artifact serving.
