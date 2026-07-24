@@ -15,6 +15,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//printer_debugger:init",
+        "//printer_debugger/kb",
         "//printer_debugger/store",
         "@pypi//fastapi",
     ],

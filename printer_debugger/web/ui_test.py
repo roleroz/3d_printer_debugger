@@ -62,6 +62,7 @@ class SessionListPageTest(UiTestBase):
         self.assertIn("Warping", body)
         self.assertIn("mode-badge", body)
         self.assertIn(f'href="/sessions/{self.session.id}"', body)
+        self.assertIn('id="printer-import-input"', body)  # Import-printers affordance.
 
     def test_json_api_still_available(self) -> None:
         """The JSON session list stays available under /api/sessions for scripted callers."""

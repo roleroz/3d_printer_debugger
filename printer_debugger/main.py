@@ -62,6 +62,7 @@ def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
         on_upload=lambda artifact, body: composition.build_index_for_upload(
             store, artifacts, artifact, body
         ),
+        ingest_kb=lambda text: kb.ingest(text),
         resolve_approval=gate.resolve,
         emergency_stop=composition.make_emergency_stop(store),
     )

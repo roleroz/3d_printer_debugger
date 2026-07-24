@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 
+from printer_debugger.kb.models import IngestOutcome
 from printer_debugger.store.db import Database
 from printer_debugger.store.models import PrinterStatus
 from printer_debugger.store.structured_store import StructuredStore
@@ -103,6 +104,66 @@ class LocalModeTest(AppTestBase):
         )
         printers = self.client.get("/printers").json()["printers"]
         self.assertEqual(printers[0]["name"], "Voron")
+
+
+class PrinterImportTest(AppTestBase):
+    """The printer-import route surfaces the ingest outcome, or 400/503 when it cannot run."""
+
+    def _context(self, ingest_kb: object = None) -> AppContext:
+        return AppContext(
+            store=self.store,
+            auth=AuthConfig(mode=AuthMode.LOCAL),
+            ingest_kb=ingest_kb,  # type: ignore[arg-type]
+        )
+
+    def test_import_returns_outcome(self) -> None:
+        """A successful import returns the upserted/degraded printers and the messages list."""
+        outcome = IngestOutcome(
+            printers_upserted=("Voron",),
+            printers_degraded=("Voron",),
+            messages=("Voron is degraded: missing config_path.",),
+        )
+        captured: list[str] = []
+
+        def fake(text: str) -> IngestOutcome:
+            captured.append(text)
+            return outcome
+
+        client = self._client(self._context(ingest_kb=fake))
+        response = client.post(
+            "/printers/import",
+            content="# Voron\naddr: 1.2.3.4".encode("utf-8"),
+            headers={"Content-Type": "text/markdown", "X-Filename": "printers.md"},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["printers_upserted"], ["Voron"])
+        self.assertEqual(data["printers_degraded"], ["Voron"])
+        self.assertEqual(data["messages"], ["Voron is degraded: missing config_path."])
+        self.assertEqual(captured, ["# Voron\naddr: 1.2.3.4"])
+
+    def test_empty_body_is_rejected(self) -> None:
+        """An empty uploaded document is rejected with 400 before the ingester runs."""
+        called: list[str] = []
+
+        def fake(text: str) -> IngestOutcome:
+            called.append(text)
+            return IngestOutcome()
+
+        client = self._client(self._context(ingest_kb=fake))
+        response = client.post(
+            "/printers/import", content=b"", headers={"Content-Type": "text/markdown"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(called, [])
+
+    def test_no_ingester_returns_503(self) -> None:
+        """With no ingester wired the route reports 503 rather than silently doing nothing."""
+        client = self._client(self._context(ingest_kb=None))
+        response = client.post(
+            "/printers/import", content=b"# Voron", headers={"Content-Type": "text/markdown"}
+        )
+        self.assertEqual(response.status_code, 503)
 
 
 class ExposedModeTest(AppTestBase):

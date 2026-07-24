@@ -82,6 +82,12 @@ def render_session_list(
         '<main class="session-index">'
         '<button type="button" id="new-session" class="primary new-session">'
         "New session</button>"
+        '<section class="printer-import">'
+        '<label class="import-btn" for="printer-import-input" '
+        'title="Import printer definitions from a markdown file">Import printers</label>'
+        '<input type="file" id="printer-import-input" accept=".md,text/markdown" hidden>'
+        '<div class="import-results" id="import-results" hidden></div>'
+        "</section>"
         f"{listing}"
         "</main>"
     )

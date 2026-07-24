@@ -19,6 +19,7 @@ from typing import Any, AsyncIterator, Awaitable, BinaryIO, Callable, Iterator
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from ..kb.models import IngestOutcome
 from ..store.artifact_store import ArtifactStore, artifact_key
 from ..store.errors import ArtifactNotFoundError
 from ..store.models import ArtifactKind, MessageRole
@@ -36,6 +37,8 @@ EmergencyStop = Callable[[str], None]
 # on_upload(artifact, body) builds and stores any index a just-uploaded file needs (a G-code
 # index synchronously; a .3mf is stored whole, mesh read on demand). The composition supplies it.
 OnUpload = Callable[[Any, bytes], None]
+# ingest_kb(document) parses an uploaded knowledge-base markdown into printer records.
+IngestKb = Callable[[str], IngestOutcome]
 
 
 @dataclass
@@ -48,6 +51,7 @@ class AppContext:
     resolve_approval: Callable[[str, bool, str], bool] = lambda *_: False
     on_message: OnMessage | None = None
     on_upload: OnUpload | None = None
+    ingest_kb: IngestKb | None = None
     emergency_stop: EmergencyStop | None = None
     artifacts: ArtifactStore | None = None
     max_upload_bytes: int = 500 * 1024 * 1024
@@ -254,6 +258,34 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
             return JSONResponse({"error": "no printer control"}, status_code=503)
         context.emergency_stop(printer_id)
         return JSONResponse({"stopped": True})
+
+    @app.post("/printers/import")
+    async def import_printers(request: Request) -> Response:
+        # The uploaded markdown is the request body (raw-upload style shared with /files).
+        if context.ingest_kb is None:
+            return JSONResponse({"error": "printer import is not available"}, status_code=503)
+        declared = request.headers.get("Content-Length")
+        if declared is not None and int(declared) > context.max_upload_bytes:
+            return JSONResponse(
+                {"error": "file too large",
+                 "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
+                status_code=413,
+            )
+        body = await request.body()
+        if not body:
+            return JSONResponse({"error": "no document was uploaded"}, status_code=400)
+        text = body.decode("utf-8", errors="replace")
+        outcome = context.ingest_kb(text)
+        return JSONResponse(
+            {
+                "printers_upserted": list(outcome.printers_upserted),
+                "printers_degraded": list(outcome.printers_degraded),
+                "printers_absent": list(outcome.printers_absent),
+                "unnamed_sections": list(outcome.unnamed_sections),
+                "shared_context_headings": list(outcome.shared_context_headings),
+                "messages": list(outcome.messages),
+            }
+        )
 
     @app.get("/printers")
     async def list_printers() -> dict:

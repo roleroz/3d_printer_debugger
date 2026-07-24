@@ -11,6 +11,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     wireNewSession();
+    wirePrinterImport();
     const view = document.querySelector(".session-view");
     if (view) {
       const sessionId = view.dataset.sessionId;
@@ -42,6 +43,69 @@
         button.disabled = false;
       }
     });
+  }
+
+  // --- Printer import: upload a knowledge-base .md and show the ingest outcome ---------------
+  function wirePrinterImport() {
+    const input = document.getElementById("printer-import-input");
+    const results = document.getElementById("import-results");
+    if (!input) return;
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      if (results) {
+        results.hidden = false;
+        results.textContent = "Importing " + (file.name || "document") + "…";
+      }
+      try {
+        const res = await fetch("/printers/import", {
+          method: "POST",
+          headers: { "Content-Type": "text/markdown", "X-Filename": file.name || "" },
+          body: file,
+        });
+        const data = await res.json().catch(() => ({}));
+        renderImportResults(results, res, data);
+      } catch (err) {
+        if (results) {
+          results.hidden = false;
+          results.textContent = "Import failed: " + err;
+        }
+      }
+      input.value = "";
+    });
+  }
+
+  function renderImportResults(results, res, data) {
+    if (!results) return;
+    results.hidden = false;
+    results.innerHTML = "";
+    if (!res.ok) {
+      const p = document.createElement("p");
+      p.className = "import-error";
+      p.textContent = data && data.error ? data.error : "Import failed (" + res.status + ").";
+      results.appendChild(p);
+      return;
+    }
+    const upserted = data.printers_upserted || [];
+    const degraded = data.printers_degraded || [];
+    const summary = document.createElement("p");
+    summary.className = "import-summary";
+    let text = upserted.length + (upserted.length === 1 ? " printer" : " printers") + " imported";
+    if (degraded.length) text += ", " + degraded.length + " with degraded config";
+    summary.textContent = text + ".";
+    results.appendChild(summary);
+    // Surface the ingester's user-facing notes (degraded reasons, missing config paths, etc.).
+    const messages = data.messages || [];
+    if (messages.length) {
+      const ul = document.createElement("ul");
+      ul.className = "import-messages";
+      messages.forEach((m) => {
+        const li = document.createElement("li");
+        li.textContent = m;
+        ul.appendChild(li);
+      });
+      results.appendChild(ul);
+    }
   }
 
   // --- Composer: optimistic user message + POST ----------------------------------------------
