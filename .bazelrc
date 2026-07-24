@@ -7,6 +7,12 @@ common --lockfile_mode=update
 # Live/hardware tests are tagged; exclude them from the default suite.
 test --test_tag_filters=-manual,-requires-network
 
+# Build only the test targets (and their deps) under `bazel test //...`, not every target in the
+# pattern. This keeps //printer_debugger:main and //:image — the only targets that depend on the
+# ~273 MB claude-agent-sdk wheel — out of the test build, so `bazel test //...` never fetches it.
+# `bazel build //:image` still builds the image (and fetches the SDK) explicitly.
+test --build_tests_only
+
 # Manage __init__.py explicitly rather than relying on implicit creation.
 common --incompatible_default_to_explicit_init_py
 
