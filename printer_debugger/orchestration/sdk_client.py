@@ -79,7 +79,13 @@ class ClaudeAgentClient:
     async def run_turn(  # pragma: no cover - live path; needs the SDK + credentials
         self, session_id: str, user_content: list[Any]
     ) -> AsyncIterator[AgentEvent]:
-        """Run a turn: build options, stream the SDK's messages, and translate them to events."""
+        """Run a turn: build options, stream the SDK's messages, and translate them to events.
+
+        A ``can_use_tool`` callback requires the SDK's **streaming-input** mode, so the prompt is an
+        async iterable yielding one user message (not a bare string). The loop ends at the turn's
+        ``ResultMessage`` so ``run_turn`` returns after a single turn rather than waiting for more
+        input.
+        """
         from claude_agent_sdk import query
 
         options = sdk_config.build_options(
@@ -91,16 +97,17 @@ class ClaudeAgentClient:
             resume=self._resume_lookup(session_id),
             env=self._env,
         )
-        prompt = _content_to_prompt(user_content)
-        async for message in query(prompt=prompt, options=options):
+
+        async def _input_stream() -> AsyncIterator[dict[str, Any]]:
+            yield {
+                "type": "user",
+                "session_id": "",
+                "message": {"role": "user", "content": user_content},
+                "parent_tool_use_id": None,
+            }
+
+        async for message in query(prompt=_input_stream(), options=options):
             for event in translate_message(message):
                 yield event
-
-
-def _content_to_prompt(user_content: list[Any]) -> str:
-    """Flatten a message block list into the prompt text the SDK's query expects."""
-    parts: list[str] = []
-    for block in user_content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(str(block.get("text", "")))
-    return "\n".join(parts)
+            if type(message).__name__ == "ResultMessage":
+                break
