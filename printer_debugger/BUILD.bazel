@@ -1,10 +1,30 @@
-load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 py_library(
     name = "init",
     srcs = ["__init__.py"],
     imports = [".."],
     visibility = ["//visibility:public"],
+)
+
+# The composition wiring: agent turn, approval gate, index build. It imports claude-agent-sdk only
+# lazily (inside functions), so it carries NO Bazel dependency on the SDK — tests can depend on it
+# without fetching the ~273 MB wheel. Only :main (the binary) declares the SDK dependency, for the
+# container image.
+py_library(
+    name = "composition",
+    srcs = ["composition.py"],
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":init",
+        "//printer_debugger/indexing",
+        "//printer_debugger/orchestration",
+        "//printer_debugger/printer",
+        "//printer_debugger/procedures",
+        "//printer_debugger/store",
+        "//printer_debugger/web",
+    ],
 )
 
 py_binary(
@@ -14,10 +34,23 @@ py_binary(
     main = "main.py",
     visibility = ["//visibility:public"],
     deps = [
+        ":composition",
         ":init",
+        "//printer_debugger/kb",
         "//printer_debugger/store",
         "//printer_debugger/web",
+        "@pypi//claude_agent_sdk",
         "@pypi//uvicorn",
+    ],
+)
+
+py_test(
+    name = "composition_test",
+    size = "small",
+    srcs = ["composition_test.py"],
+    deps = [
+        ":composition",
+        "@pypi//httpx",
     ],
 )
 
