@@ -866,3 +866,22 @@ not planned.
 
 **Sources:** Anthropic web-fetch tool docs (server-tool execution model) and Claude Code / Agent SDK
 permissions docs (domain allowlist, `disallowed_tools`), reviewed 2026-07-23.
+
+## 2026-07-23 — Object attribution stays marker-only; geometric fallback is future work
+
+**Decision:** G-code object attribution uses the slicer's object markers only. The geometric
+fallback — attributing an extrusion to the object whose plate-layout footprint contains its XY when
+markers are absent — is **not built now** and becomes future work. (file_indexing.md T4.4 called for
+"markers with geometric fallback"; the fallback half is deferred.)
+
+**Future-work line to add to spec.md §14 at the next docs pass:** "Geometric object-attribution
+fallback — when a G-code file carries no slicer object markers (label-objects disabled, or a
+single-blob slice), attribute each extrusion to the object whose plate-layout footprint contains its
+XY, at lower confidence where footprints overlap. The MVP attributes by markers only, so a
+marker-less file gets no object map."
+
+**Why:** The user's OrcaSlicer workflow emits object markers by default (the real fixture has them),
+so the exact marker path covers the common case. The fallback only matters for a marker-less
+multi-object plate, which is not the current workflow; building it now would also need a marker-less
+fixture and carry the footprint-overlap ambiguity. Deferring keeps the MVP focused; the future-work
+line records exactly what to build when a marker-less file shows up.
