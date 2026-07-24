@@ -19,6 +19,8 @@ from typing import Any, AsyncIterator, Awaitable, BinaryIO, Callable, Iterator
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..kb.models import IngestOutcome
 from ..store.artifact_store import ArtifactStore, artifact_key
@@ -74,18 +76,39 @@ def create_app(context: AppContext) -> FastAPI:
             context.hub.close()
 
     app = FastAPI(lifespan=lifespan)
-
-    @app.middleware("http")
-    async def guard(request: Request, call_next):
-        subject = request.headers.get("X-Auth-Subject")
-        if not authorize(context.auth, subject):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        if not csrf_ok(context.auth, request.method, request.headers.get("Origin")):
-            return JSONResponse({"error": "cross-site request refused"}, status_code=403)
-        return await call_next(request)
-
+    app.add_middleware(AuthCsrfMiddleware, context=context)
     _register_routes(app, context)
     return app
+
+
+class AuthCsrfMiddleware:
+    """Pure-ASGI auth + CSRF gate.
+
+    Deliberately raw ASGI, not Starlette ``BaseHTTPMiddleware`` (``@app.middleware("http")``):
+    that base class routes every response through an anyio memory-object stream and a task group,
+    which buffers/stalls large upload responses, breaks long-lived SSE streams, and dumps
+    ``CancelledError`` on shutdown. Inspecting only the scope headers here leaves the request and
+    response byte streams flowing straight through uvicorn untouched.
+    """
+
+    def __init__(self, app: ASGIApp, context: AppContext) -> None:
+        self._app = app
+        self._context = context
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        if not authorize(self._context.auth, headers.get("x-auth-subject")):
+            await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
+            return
+        if not csrf_ok(self._context.auth, scope["method"], headers.get("origin")):
+            await JSONResponse(
+                {"error": "cross-site request refused"}, status_code=403
+            )(scope, receive, send)
+            return
+        await self._app(scope, receive, send)
 
 
 def _register_routes(app: FastAPI, context: AppContext) -> None:
