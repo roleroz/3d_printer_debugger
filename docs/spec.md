@@ -834,6 +834,13 @@ Deferred deliberately, in rough order of expected value:
   OrcaSlicer preset library, resolve each named preset, and diff against it to produce the
   high-signal modified-from-preset set, degrading to resolved-values-only when the library is
   unavailable (as in a cloud deployment).
+- **On-demand or background G-code index build.** The MVP builds the G-code index synchronously
+  inside the upload request ([decisions.md 2026-07-23]), so a large upload holds the request open
+  until indexing finishes. This would move indexing off the request path — building it lazily on
+  the first query that needs it, or in a background task with progress reporting — so the session
+  is usable immediately, the header and configuration block answer within seconds, and layer,
+  coordinate, and state queries become available as the pass completes, with tools reporting "still
+  indexing" rather than failing ([design/file_indexing.md] T4.6, [design/orchestration.md]).
 - **Support for other slicers** — PrusaSlicer, Bambu Studio, Cura — and their project and
   G-code formats. The MVP assumes OrcaSlicer's `.3mf` layout and G-code flavour.
 - **Support for other printer firmware** — Marlin, RepRap, Bambu, Prusa — behind the same
