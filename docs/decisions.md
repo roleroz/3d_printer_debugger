@@ -885,3 +885,27 @@ so the exact marker path covers the common case. The fallback only matters for a
 multi-object plate, which is not the current workflow; building it now would also need a marker-less
 fixture and carry the footprint-overlap ambiguity. Deferring keeps the MVP focused; the future-work
 line records exactly what to build when a marker-less file shows up.
+
+## 2026-07-23 — KB section extraction routes through the Agent SDK (subscription), not the raw API
+
+**Decision:** The printer knowledge-base ingester classifies/extracts each markdown section by
+running a small `claude-agent-sdk` query (`claude-haiku-4-5`, strict-JSON output) authenticated with
+the same subscription `CLAUDE_CODE_OAUTH_TOKEN` the main agent uses, cached by section hash so each
+section is classified at most once. This **replaces** the previous `extraction._extract_section`
+implementation, which called `anthropic.Anthropic()` (raw Messages API).
+
+**Why:** The raw-API path had two fatal problems for the container MVP: (1) `anthropic` is
+intentionally out of `requirements.lock.txt`, so it is not in the image — the first uncached section
+would `ImportError`; (2) it needs an `ANTHROPIC_API_KEY`, i.e. API billing, which contradicts the
+firm "subscription only, no API-key fallback, crash if the OAuth token is absent" decision
+([2026-07-23 credentials decision]). Routing through the Agent SDK reuses the subscription token, the
+already-bundled SDK, and the per-section cache, so no API key and no extra package are introduced.
+
+**Cost/latency:** each uncached section spawns one bundled-CLI subprocess query; acceptable because
+the result is cached by section hash forever and a KB document has only a handful of sections.
+
+**Implementation note:** the token is read from the process env (`CLAUDE_CODE_OAUTH_TOKEN`, already
+required at startup) inside the extraction module, so `KbIngester`/`main.py` signatures are
+unchanged. The exact SDK mechanism for strict-JSON output (`output_format` json-schema vs. a
+JSON-tool call read back from the result) is to be confirmed against the installed
+`claude-agent-sdk` 0.2.126 during implementation.
