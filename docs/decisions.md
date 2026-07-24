@@ -835,3 +835,34 @@ tested behind a fake-transcriber seam, not the real model.
 **Why:** Bundling keeps the "one container, no external services" property and avoids a
 first-run network dependency; `base` is fast on CPU and adequate for short voice notes, with `small`
 available by env for better accuracy on technical terms.
+
+## 2026-07-23 — Web-fetch SSRF guard dropped (WebFetch runs server-side)
+
+**Decision:** The web-fetch SSRF guard is **dropped** — it is not needed. This supersedes the
+2026-07-21 "Web fetch restricted to public addresses" decision and resolves the orchestration
+open question / task about enforcing a loopback/private/link-local refusal on web fetch
+(orchestration.md §2.2 open question, task T4.3). Web search and fetch stay enabled as-is.
+
+**Why:** The earlier decision assumed the SDK's `WebFetch` executes **locally**, on our host — which
+sits on the printer LAN — so a fetch (possibly to a URL from injected web content) could reach
+`http://<printer>:7125/...` and read Moonraker around the approval gate. Research against
+Anthropic's documentation showed that assumption is wrong: **`WebFetch`/`WebSearch` are server tools
+that
+execute on Anthropic's infrastructure, not on the host.** The HTTP request never originates from the
+machine on the printer LAN, so the model physically cannot reach the printer (or any LAN device) via
+web fetch. The LAN-bypass threat that motivated the guard does not exist for this architecture.
+
+Anthropic additionally applies server-side private-address filtering (documented via the
+`url_not_allowed` error, "Anthropic-side restrictions, such as private addresses"), though the exact
+blocked ranges are not enumerated publicly — so we rely on the **structural** guarantee (Anthropic's
+data centers cannot route to the user's LAN), not on the completeness of that filter.
+
+**Residual risk and optional hardening (not required):** confidence in the structural guarantee is
+high; confidence in Anthropic's private-IP filter completeness is medium. If we ever want to
+constrain *what* the agent browses (focus, not LAN safety), the SDK supports a domain allowlist
+(`WebFetch(domain:...)`) or disabling the tool — cheap to add later. Building our own guarded
+web-fetch MCP tool would be belt-and-suspenders against a hole that does not exist for us, so it is
+not planned.
+
+**Sources:** Anthropic web-fetch tool docs (server-tool execution model) and Claude Code / Agent SDK
+permissions docs (domain allowlist, `disallowed_tools`), reviewed 2026-07-23.
