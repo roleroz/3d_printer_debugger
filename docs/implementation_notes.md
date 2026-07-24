@@ -31,15 +31,17 @@ design. It is maintained across the module commits on the `feature/implementatio
   `LiveConfigProvider` protocol and `import_live_config`, but the concrete Moonraker-backed
   provider belongs to the printer-access module (module 4) and is wired at the composition root.
   T4.3 is left unchecked in `kb_ingestion.md` until then.
-- **[kb] Section extraction must be re-backed onto the Agent SDK (not the raw API).**
-  `extraction._extract_section` currently calls `anthropic.Anthropic()` (raw Messages API), which is
-  **broken for the container**: `anthropic` is out of `requirements.lock.txt` (not in the image) and
-  it needs an `ANTHROPIC_API_KEY` (API billing) — both contradict the subscription-only decision.
-  **Decision ([decisions.md 2026-07-23 "KB section extraction routes through the Agent SDK"]):**
-  re-implement it as a small cached `claude-agent-sdk` query (`claude-haiku-4-5`, strict JSON) using
-  the process-env `CLAUDE_CODE_OAUTH_TOKEN`. **Queued** behind the rename/printer-KB-upload/photo
-  subagent (both touch the KB area). The hermetic tests inject a stub via the `_extract_section`
-  seam, so the pure ingest logic stays testable without the SDK.
+- **[kb] Section extraction is re-backed onto the Agent SDK (DONE).**
+  `extraction._extract_section` now classifies each section via a small cached `claude-agent-sdk`
+  query (`claude-haiku-4-5`, strict JSON via the SDK's `output_format` json-schema →
+  `ResultMessage.structured_output`, with a text-parse fallback), authenticated with the process-env
+  `CLAUDE_CODE_OAUTH_TOKEN` (no `ANTHROPIC_API_KEY`, no `anthropic` package). It stays synchronous
+  and self-contained: when a request event loop is already running it drives the async query in a
+  worker-thread `asyncio.run`. The hermetic tests inject a stub via the `_extract_section` seam and
+  cover the pure `_parse_extraction`/`_dict_to_extraction` helpers, so the SDK is never imported in
+  tests. ([decisions.md 2026-07-23 "KB section extraction routes through the Agent SDK"].)
+  **Still needs the maintainer:** one live run to confirm the real haiku call returns the expected
+  JSON shape (the SDK is never invoked hermetically).
 
 - **[indexing] Background index build (T4.6) is not wired.** `index_status` exists and reports
   ready, but building the G-code index in the background with progress reporting is an
@@ -140,12 +142,24 @@ design. It is maintained across the module commits on the `feature/implementatio
   `on_upload` hook that builds and stores the G-code index synchronously while the request is open.
   SSE `data` frames carry JSON objects (the client `JSON.parse`s them, and `app.py::_frame`
   `json.dumps`es the payload), so publishers pass dicts.
-- **[web] Still deferred in the UI shell:** server-side Whisper transcription (the clip
-  uploads and is marked "transcription pending" — `faster-whisper` was chosen and should be added to
-  `requirements.txt` with a transcription module when built, T7.1); real printer-strip data (the
-  strip is structured with `data-field` hooks and shows placeholder temps/status until the printer
-  client publishes onto the session stream); and true streamed uploads with post-upload type
-  validation (the body is currently read whole before being stored, T6.1).
+- **[web] Server-side Whisper transcription is DONE.** `web/transcription.py` (`Transcriber` +
+  `TranscribeAudio` seam) loads a bundled `faster-whisper` `base` model (`local_files_only`) once;
+  `/audio` runs it via `asyncio.to_thread`, stores the transcript as the artifact note, and feeds it
+  into the session through `on_message` (same path as the text composer). The `base` model is pinned
+  in `MODULE.bazel` as `http_file` repos (HuggingFace `Systran/faster-whisper-base`) and packed into
+  the image at `/app/whisper-base/*`; imports are lazy and the model stays out of `bazel test`.
+  **Still needs the maintainer:** a live check that a real recorded clip transcribes in the
+  container (the model is never loaded in tests — a fake transcriber is injected).
+- **[web] The auth/CSRF gate is pure-ASGI, not `BaseHTTPMiddleware`.** `@app.middleware("http")`
+  (Starlette `BaseHTTPMiddleware`) routes every response through an anyio memory stream + task
+  group, which stalled large upload responses (upload reached 100% then hung with no reply), broke
+  long-lived SSE streams, and dumped `CancelledError` on shutdown. Replaced with `AuthCsrfMiddleware`
+  (raw ASGI, inspects only scope headers) so request/response byte streams flow straight through
+  uvicorn. Auth/CSRF behaviour is unchanged and covered by the existing 401/403/allowed tests.
+- **[web] Still deferred in the UI shell:** real printer-strip data (the strip is structured with
+  `data-field` hooks and shows placeholder temps/status until the printer client publishes onto the
+  session stream); and true streamed uploads with post-upload type validation (the body is currently
+  read whole before being stored, T6.1).
 
 - **[container] The OCI image builds via Bazel; the no-system-python case is verified.**
   `bazel build //:image` succeeds (rules_oci, `debian:12-slim` base pinned by digest). The binary
