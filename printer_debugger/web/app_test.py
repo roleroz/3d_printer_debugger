@@ -51,9 +51,10 @@ class LocalModeTest(AppTestBase):
         """Health reports the mode; a session can be created, listed, viewed, and closed."""
         self.assertEqual(self.client.get("/healthz").json()["mode"], "local")
         created = self.client.post("/sessions", json={"name": "Warping"}).json()
-        self.assertIn(created["id"], [s["id"] for s in self.client.get("/").json()["sessions"]])
+        listed = self.client.get("/api/sessions").json()["sessions"]
+        self.assertIn(created["id"], [s["id"] for s in listed])
         self.client.post(f"/sessions/{created['id']}/messages", json={"text": "help"})
-        view = self.client.get(f"/sessions/{created['id']}").json()
+        view = self.client.get(f"/api/sessions/{created['id']}").json()
         self.assertEqual(view["messages"][0]["role"], "user")
         self.assertEqual(self.client.post(f"/sessions/{created['id']}/close").json(), {"ok": True})
 

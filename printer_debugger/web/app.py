@@ -8,17 +8,26 @@ passes the auth and CSRF checks first; the emergency stop is separate and minima
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from pathlib import Path
+from typing import Any, Awaitable, BinaryIO, Callable, Iterator
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from ..store.artifact_store import ArtifactStore, artifact_key
+from ..store.errors import ArtifactNotFoundError
 from ..store.models import ArtifactKind, MessageRole
 from ..store.structured_store import StructuredStore
-from .security import AuthConfig, AuthMode, authorize, csrf_ok
+from . import templates
+from .security import AuthConfig, authorize, csrf_ok
 from .sse import SseHub
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_STATIC_TYPES = {"app.js": "application/javascript", "styles.css": "text/css"}
 
 # on_message(session_id, content) enqueues a turn; emergency_stop(printer_id) fires M112.
 OnMessage = Callable[[str, list[Any]], Awaitable[None]]
@@ -35,6 +44,7 @@ class AppContext:
     resolve_approval: Callable[[str, bool, str], bool] = lambda *_: False
     on_message: OnMessage | None = None
     emergency_stop: EmergencyStop | None = None
+    artifacts: ArtifactStore | None = None
     max_upload_bytes: int = 500 * 1024 * 1024
 
 
@@ -62,7 +72,14 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
     async def healthz() -> dict:
         return {"store": "ok", "mode": context.auth.mode.value}
 
-    @app.get("/")
+    @app.get("/", response_class=HTMLResponse)
+    async def session_list_page() -> Response:
+        printers = {p.id: p for p in store.list_printers()}
+        return HTMLResponse(
+            templates.render_session_list(store.list_sessions(), printers, context.auth)
+        )
+
+    @app.get("/api/sessions")
     async def session_list() -> dict:
         return {
             "sessions": [
@@ -72,12 +89,38 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
             ]
         }
 
+    @app.get("/static/{name}")
+    async def static_file(name: str) -> Response:
+        content_type = _STATIC_TYPES.get(name)
+        path = _STATIC_DIR / name
+        if content_type is None or not path.is_file():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return Response(content=path.read_bytes(), media_type=content_type)
+
     @app.post("/sessions")
     async def create_session(body: dict) -> dict:
         session = store.create_session(name=body.get("name", "New session"))
         return {"id": session.id, "name": session.name}
 
-    @app.get("/sessions/{session_id}")
+    @app.get("/sessions/{session_id}", response_class=HTMLResponse)
+    async def session_view_page(session_id: str) -> Response:
+        session = store.get_session(session_id)
+        if session is None:
+            return HTMLResponse("<h1>Session not found</h1>", status_code=404)
+        printer = (
+            store.get_printer(session.printer_id) if session.printer_id is not None else None
+        )
+        return HTMLResponse(
+            templates.render_session_view(
+                session,
+                store.list_messages(session_id),
+                store.list_artifacts(session_id),
+                printer,
+                context.auth,
+            )
+        )
+
+    @app.get("/api/sessions/{session_id}")
     async def session_view(session_id: str) -> Response:
         session = store.get_session(session_id)
         if session is None:
@@ -114,14 +157,43 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                  "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
                 status_code=413,
             )
+        content_type = request.headers.get("Content-Type", "application/octet-stream")
         body = await request.body()
-        # A real deployment streams to the artifact store; here we record the metadata.
-        artifact = store.add_artifact(
-            session_id=session_id, kind=ArtifactKind.PROJECT,
-            blob_key=f"sessions/{session_id}/upload", size_bytes=len(body),
-            content_type=request.headers.get("Content-Type", "application/octet-stream"),
+        artifact = _store_upload(
+            context, session_id, body, _kind_for_content_type(content_type), content_type
         )
         return JSONResponse({"artifact_id": artifact.id, "size": len(body)})
+
+    @app.post("/sessions/{session_id}/audio")
+    async def upload_audio(session_id: str, request: Request) -> Response:
+        declared = request.headers.get("Content-Length")
+        if declared is not None and int(declared) > context.max_upload_bytes:
+            return JSONResponse(
+                {"error": "file too large",
+                 "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
+                status_code=413,
+            )
+        content_type = request.headers.get("Content-Type", "audio/webm")
+        body = await request.body()
+        # Whisper transcription is deferred; the clip is stored and marked pending.
+        artifact = _store_upload(
+            context, session_id, body, ArtifactKind.AUDIO, content_type,
+            note="transcription pending",
+        )
+        return JSONResponse(
+            {"artifact_id": artifact.id, "size": len(body), "transcription": "pending"}
+        )
+
+    @app.get("/artifacts/{artifact_id}")
+    async def serve_artifact(artifact_id: str) -> Response:
+        artifact = store.get_artifact(artifact_id)
+        if artifact is None or context.artifacts is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        try:
+            stream = context.artifacts.open(artifact.blob_key)
+        except ArtifactNotFoundError:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return StreamingResponse(_iter_blob(stream), media_type=artifact.content_type)
 
     @app.get("/sessions/{session_id}/stream")
     async def stream(session_id: str, request: Request) -> StreamingResponse:
@@ -183,3 +255,46 @@ async def _event_stream(hub: SseHub, session_id: str, last_id: int, request: Req
 
 def _frame(event) -> str:
     return f"id: {event.id}\nevent: {event.kind}\ndata: {json.dumps(event.data)}\n\n"
+
+
+def _kind_for_content_type(content_type: str) -> ArtifactKind:
+    """Classify an uploaded blob by its declared content type for inline rendering."""
+    if content_type.startswith("image/"):
+        return ArtifactKind.PHOTO
+    if content_type.startswith("audio/"):
+        return ArtifactKind.AUDIO
+    return ArtifactKind.PROJECT
+
+
+def _store_upload(
+    context: AppContext,
+    session_id: str,
+    body: bytes,
+    kind: ArtifactKind,
+    content_type: str,
+    note: str | None = None,
+) -> Any:
+    """Persist an uploaded blob (when an artifact store is present) and record its metadata.
+
+    The blob key is derived from identifiers, never from a user-supplied filename, so a served
+    artifact can be found again by its stored key ([store.md §5]).
+    """
+    blob_key = artifact_key(session_id, uuid.uuid4().hex)
+    if context.artifacts is not None:
+        context.artifacts.put(blob_key, io.BytesIO(body))
+    return context.store.add_artifact(
+        session_id=session_id, kind=kind, blob_key=blob_key,
+        size_bytes=len(body), content_type=content_type, note=note,
+    )
+
+
+def _iter_blob(stream: BinaryIO, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    """Yield an artifact's bytes in bounded chunks, closing the stream when exhausted."""
+    try:
+        while True:
+            chunk = stream.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        stream.close()

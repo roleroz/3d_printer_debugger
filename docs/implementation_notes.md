@@ -81,19 +81,32 @@ design. It is maintained across the module commits on the `feature/implementatio
   timeout-as-denial, crash-recovery-to-denial, no-bypass). This is the load-bearing security
   component and it is green.
 
-- **[web] The backend routes, security, SSE fan-out, and startup are implemented and tested; the
-  HTML/JS presentation layer is not.** The FastAPI app exposes JSON routes with the auth + CSRF
-  middleware (the cross-site-POST-to-approvals refusal is tested), SSE fan-out with
-  position-based reconnect, upload Content-Length pre-check, the emergency-stop route, and startup
-  URL printing. **Not implemented (deferred):** server-rendered HTML pages (T4.1/T4.2), the client
-  JavaScript for camera/mic/upload-progress/SSE-consumer and the approval refusal UI where Enter
-  must not approve (T4.3, T5.1 UI half), audio recording + Whisper transcription (T7.1), true
-  streamed uploads to the artifact store (T6.1 does the size pre-check only), and artifact serving
-  (T4.4). The OIDC integration is represented by an `X-Auth-Subject` seam; a real OIDC middleware
-  validates and sets it.
-- **[web] Local Whisper transcription is not implemented.** `faster-whisper` was chosen but audio
-  capture/transcription (T7.1) is deferred with the client JS; add `faster-whisper` to
-  requirements and a transcription module when building it.
+- **[web] The UI shell is now built over the existing backend routes.** Server-rendered HTML pages
+  (`GET /` session list, `GET /sessions/{id}` session view) are rendered with plain Python string
+  templates plus `html.escape` (`web/templates.py`) — no templating engine, no bundler. The
+  hand-written client JS (`web/static/app.js`, served with `web/static/styles.css` from a
+  `/static/{name}` route backed by Bazel `data` files) covers the four browser capabilities:
+  camera capture (`capture="environment"` file input, preview + upload), audio recording
+  (`MediaRecorder`, two-minute cap-and-submit), upload progress (XHR progress bar for large
+  `.3mf`/G-code), and the SSE consumer (`EventSource` with position-based `last_id` reconnect and
+  optimistic render of the user's own message). The approval interface renders the command verbatim
+  in monospace with danger flags and a five-minute countdown; its refusal properties are baked into
+  the markup and JS (Reject precedes Approve, Approve has no `autofocus`/default focus, and a
+  keydown guard swallows Enter/Space so a stray keypress cannot approve) and are covered by
+  `web/ui_test.py`. Artifact serving (`GET /artifacts/{id}`) streams the blob with its stored
+  content-type (404 when the row or blob is missing); this required adding an `ArtifactStore` to
+  `AppContext`, now wired in `main.py`. Uploads persist into the artifact store and are classified
+  by content-type (image → photo, audio → audio). The JSON reads moved to `GET /api/sessions` and
+  `GET /api/sessions/{id}`; the mutating routes still return JSON. The OIDC integration is still an
+  `X-Auth-Subject` seam; a real OIDC middleware validates and sets it.
+- **[web] Still deferred in the UI shell:** the live Claude-agent conversation (assistant replies
+  arrive over SSE only once the Agent-SDK adapter is wired — the composer optimistically renders the
+  user's message and no assistant text is produced yet); server-side Whisper transcription (the clip
+  uploads and is marked "transcription pending" — `faster-whisper` was chosen and should be added to
+  `requirements.txt` with a transcription module when built, T7.1); real printer-strip data (the
+  strip is structured with `data-field` hooks and shows placeholder temps/status until the printer
+  client publishes onto the session stream); and true streamed uploads with post-upload type
+  validation (the body is currently read whole before being stored, T6.1).
 
 - **[container] The OCI image builds via Bazel; the no-system-python case is verified.**
   `bazel build //:image` succeeds (rules_oci, `debian:12-slim` base pinned by digest). The binary

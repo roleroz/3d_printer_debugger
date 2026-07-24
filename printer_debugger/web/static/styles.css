@@ -1,0 +1,179 @@
+/* Mobile-first styling for the 3D Printer Debugger UI (web.md §4).
+ * One column, large touch targets, an always-reachable emergency stop. No framework. */
+
+:root {
+  --bg: #12141a;
+  --surface: #1c1f27;
+  --surface-2: #262a34;
+  --text: #e7e9ee;
+  --muted: #9aa0ac;
+  --accent: #4c8dff;
+  --danger: #ff4d4f;
+  --ok: #35c46b;
+  --border: #333844;
+  --radius: 10px;
+  font-size: 16px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.4;
+  -webkit-text-size-adjust: 100%;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.8rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.top h1 { font-size: 1.1rem; margin: 0; flex: 1; }
+.back { color: var(--accent); text-decoration: none; font-size: 1.4rem; }
+
+.mode-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.mode-exposed { color: #ffd166; }
+
+.primary, button.primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* Session list */
+.session-index { padding: 1rem; }
+.new-session { width: 100%; margin-bottom: 1rem; }
+.session-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: 0.6rem; }
+.session-link {
+  display: block;
+  padding: 0.9rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+.session-name { display: block; font-weight: 600; margin-bottom: 0.3rem; }
+.session-meta { display: flex; gap: 0.75rem; flex-wrap: wrap; color: var(--muted);
+  font-size: 0.8rem; }
+.session-row.state-closed .session-link { opacity: 0.6; }
+.empty { color: var(--muted); text-align: center; margin-top: 2rem; }
+
+/* Printer strip */
+.printer-strip {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.printer-strip.offline { opacity: 0.7; }
+.printer-strip.stale { outline: 1px dashed var(--danger); }
+.printer-name { color: var(--text); font-weight: 600; }
+.printer-conn { color: var(--ok); }
+.printer-strip.offline .printer-conn { color: var(--danger); }
+
+/* Emergency stop — visually distinct, always reachable */
+.estop {
+  background: var(--danger);
+  color: #fff;
+  border: 2px solid #fff;
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+/* Conversation */
+.conversation { padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;
+  min-height: 40vh; }
+.message { padding: 0.6rem 0.8rem; border-radius: var(--radius); background: var(--surface);
+  border: 1px solid var(--border); }
+.message.role-user { background: var(--surface-2); align-self: flex-end; max-width: 85%; }
+.message.role-assistant { align-self: flex-start; max-width: 90%; }
+.message.role-system { border-style: dashed; color: var(--muted); }
+.message-role { font-size: 0.65rem; text-transform: uppercase; color: var(--muted);
+  letter-spacing: 0.06em; }
+.block-text { margin: 0.3rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.block-image, .attachment-image img { max-width: 100%; border-radius: var(--radius); }
+.tool-activity { font-size: 0.8rem; color: var(--muted); font-style: italic; }
+
+/* Attachments */
+.attachments { padding: 0 1rem; display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.attachment { background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.5rem 0.7rem; font-size: 0.8rem; }
+.attachment-file { display: flex; gap: 0.5rem; align-items: center; }
+.attachment-kind { color: var(--accent); text-transform: uppercase; font-size: 0.65rem; }
+.attachment-size { color: var(--muted); }
+.attachment-pending { color: #ffd166; font-size: 0.7rem; }
+.attachment figcaption { color: var(--muted); font-size: 0.7rem; margin-top: 0.2rem; }
+
+/* Composer */
+.composer { position: sticky; bottom: 0; background: var(--surface);
+  border-top: 1px solid var(--border); padding: 0.6rem; display: flex; flex-direction: column;
+  gap: 0.5rem; }
+#composer-text { width: 100%; resize: none; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem; font-size: 1rem; }
+.composer-actions { display: flex; gap: 0.5rem; align-items: center; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px;
+  min-height: 44px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); font-size: 1.2rem; cursor: pointer; }
+.send { flex: 1; font-size: 1rem; background: var(--accent); color: #fff; border: none; }
+.upload-progress { display: flex; gap: 0.5rem; align-items: center; font-size: 0.8rem;
+  color: var(--muted); }
+.upload-progress progress { flex: 1; }
+.recording .mic { background: var(--danger); color: #fff; }
+
+/* Approval interface */
+.approval-slot:empty { display: none; }
+.approval { margin: 1rem; padding: 1rem; border: 2px solid var(--danger);
+  border-radius: var(--radius); background: var(--surface); }
+.approval-title { margin: 0 0 0.5rem; color: var(--danger); font-size: 1.1rem; }
+.approval-danger { background: rgba(255, 77, 79, 0.15); border: 1px solid var(--danger);
+  border-radius: var(--radius); padding: 0.5rem 0.7rem; margin-bottom: 0.6rem; font-weight: 600;
+  color: var(--danger); }
+.approval-intent { color: var(--text); }
+.approval-command { background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.7rem; overflow-x: auto; font-family: ui-monospace,
+  "SF Mono", Menlo, Consolas, monospace; font-size: 0.85rem; white-space: pre; }
+.approval-countdown { color: var(--muted); font-size: 0.8rem; }
+.approval-actions { display: flex; gap: 0.6rem; margin-top: 0.6rem; }
+.approval-actions button { flex: 1; min-height: 48px; border-radius: var(--radius); border: none;
+  font-size: 1rem; cursor: pointer; }
+.approval-actions .reject { background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); }
+.approval-actions .approve { background: var(--danger); color: #fff; }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f6f8; --surface: #fff; --surface-2: #eef0f4; --text: #1a1c22; --muted: #5c6270;
+    --border: #d6dae2;
+  }
+}
