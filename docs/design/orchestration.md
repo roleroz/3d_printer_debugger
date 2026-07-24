@@ -49,13 +49,14 @@ enables it.
 Web search and fetch are allowed: diagnosis needs them, and they read rather than write
 ([decisions.md](../decisions.md)).
 
-But "they never touch the host" is not the whole story. This host sits on the printer network, so
-an unrestricted fetch could reach the printer's own HTTP API — `http://<printer>:7125/...` —
-reading Moonraker directly, around the three-tier discipline and the gate, on a URL that may have
-come from injected web content. **Web fetch is therefore restricted to public addresses**: loopback,
-RFC-1918 private ranges, and link-local are refused, so a fetch cannot reach the printer or any
-other LAN device. Whether the SDK enforces this itself or we must front it is an open question
-([§9](#9-open-questions)).
+And "they never touch the host" holds more strongly than an earlier draft assumed. The SDK's
+`WebFetch` and `WebSearch` are **server tools that execute on Anthropic's infrastructure, not on
+this host**, so a fetch never originates from the machine on the printer network and cannot reach
+the printer's HTTP API or any other LAN device. An earlier draft assumed *local* execution and
+therefore added an SSRF guard restricting web fetch to public addresses; research against the
+SDK/API docs showed local execution is not how it works, so the guard was **dropped** as unnecessary
+([decisions.md, 2026-07-23](../decisions.md)). Anthropic also applies server-side private-address
+filtering, and a domain allowlist is available if we ever want to constrain what the agent browses.
 
 ### 2.3 Conversation is mirrored into the store
 
@@ -234,8 +235,6 @@ crash must never resolve to an approval.
 - **A test proves the gate cannot be bypassed by prompt content**: a session whose input contains
   instructions to skip confirmation still stops at the gate. This is a regression test for the
   property the whole security argument rests on.
-- **A test proves web fetch cannot reach the LAN**: a fetch aimed at a loopback, private, or
-  link-local address is refused, so the printer's HTTP API is not reachable around the gate.
 - **Agent SDK interaction is tested against the real SDK** with a stub model transport. Faking the
   SDK would mean reproducing its permission and streaming semantics — the exact behaviours under
   test — which would be a re-implementation.
@@ -269,11 +268,10 @@ crash must never resolve to an approval.
    actual findings — and may drop reconstruction-only elements the SDK will not accept, such as
    thinking blocks, which are the model's scratch work and not part of the record. So the fallback
    is guaranteed to work even if fidelity is imperfect; open is only which elements survive intact.
-4. **Whether web fetch's address restriction is enforced by the SDK or by us.** Web fetch must
-   refuse loopback, private, and link-local addresses so it cannot reach the printer LAN
-   ([§2.2](#22-tool-permissions-are-configured-four-ways)). Whether the Agent SDK's fetch tool
-   already enforces this, exposes a hook for it, or must be fronted by our own fetch proxy is
-   confirmed against the SDK at implementation.
+4. *(Resolved 2026-07-23)* **Web fetch's address restriction** — no longer open. The SDK's
+   `WebFetch` runs server-side on Anthropic's infrastructure, so it cannot reach the printer LAN and
+   no guard is needed; the restriction was dropped (see §2.2 and
+   [decisions.md](../decisions.md)).
 
 ## 10. Implementation tasks
 
@@ -284,8 +282,8 @@ crash must never resolve to an approval.
       end-to-end: per-session in-process MCP servers, `build_prompt`, and the `approve` bridge to
       the gate ([composition.py]).
 - [x] **T4.2** System prompt assembly with stable-first ordering.
-- [ ] **T4.3** Web-fetch address restriction: refuse loopback, private, and link-local addresses,
-      by SDK configuration or a fetch proxy, so it cannot reach the printer LAN.
+- [x] **T4.3** ~~Web-fetch address restriction~~ — **dropped**: `WebFetch` runs server-side and
+      cannot reach the LAN, so no guard is needed ([decisions.md](../decisions.md)).
 - [x] **T5.1** Turn loop: streaming, incremental persistence, usage accumulation.
 - [x] **T5.2** Interrupted-call sweep at startup.
 - [x] **T6.1** The approval gate: classification handoff, persistence, publication, awaited

@@ -818,6 +818,10 @@ Deferred deliberately, in rough order of expected value:
   own objects, layout, and sliced G-code. The MVP treats a project as a single plate; this would
   index every plate and associate each with its own G-code, so a session can concern any plate in
   a multi-plate project.
+- **Geometric object-attribution fallback.** When a G-code file carries no slicer object markers
+  (label-objects disabled, or a single-blob slice), attribute each extrusion to the object whose
+  plate-layout footprint contains its XY, at lower confidence where footprints overlap. The MVP
+  attributes by markers only, so a marker-less file gets no object map.
 - **Per-layer intended cross-section.** The MVP presents intended geometry as whole-object rendered
   views. This would slice the model at a given height to show the intended outline at a specific
   layer, so a defect at a layer can be compared against the exact intended shape there rather than
