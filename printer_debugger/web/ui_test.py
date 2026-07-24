@@ -16,6 +16,7 @@ from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
 from printer_debugger.store.db import Database
 from printer_debugger.store.models import ArtifactKind, MessageRole, PrinterStatus
 from printer_debugger.store.structured_store import StructuredStore
+from printer_debugger.web import templates
 from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode
 
@@ -99,6 +100,29 @@ class SessionViewPageTest(UiTestBase):
         """A view of an unknown session returns a 404 HTML page, not a stack trace."""
         response = self.client.get("/sessions/ses_missing")
         self.assertEqual(response.status_code, 404)
+
+
+class PrinterPickerTest(UiTestBase):
+    """The session view renders a server-side picker to bind or rebind the printer ([web.md])."""
+
+    def test_view_has_printer_select_with_bound_option_selected(self) -> None:
+        """GET /sessions/{id} renders a printer_id select with the bound printer preselected."""
+        other = self.store.create_printer(
+            name="Prusa", kb_section="s", kb_content_hash="h", status=PrinterStatus.COMPLETE
+        )
+        body = self.client.get(f"/sessions/{self.session.id}").text
+        self.assertIn('name="printer_id"', body)
+        self.assertIn(f'action="/sessions/{self.session.id}/printer"', body)
+        self.assertIn(f'<option value="{self.printer.id}" selected>Voron</option>', body)
+        self.assertIn(f'<option value="{other.id}">Prusa</option>', body)
+
+    def test_no_printers_renders_import_hint(self) -> None:
+        """With no printers, the picker shows an import hint instead of an empty select."""
+        loose = self.store.create_session(name="Loose")
+        html = templates.render_session_view(loose, [], [], None, [], self.context.auth)
+        self.assertNotIn('name="printer_id"', html)
+        self.assertIn("No printers", html)
+        self.assertIn('href="/"', html)
 
 
 class ApprovalRefusalPropertiesTest(UiTestBase):

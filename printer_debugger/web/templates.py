@@ -174,6 +174,42 @@ def _printer_strip(session: Session, printer: Printer | None) -> str:
     )
 
 
+def _printer_picker(
+    session: Session, printer: Printer | None, printers: list[Printer]
+) -> str:
+    """Render the server-side printer picker: a form to bind or rebind the session's printer.
+
+    With no printers imported yet, a hint pointing at the home-page import replaces the select.
+    Otherwise a ``<select name="printer_id">`` lists every printer with the bound one preselected;
+    submitting posts to ``/sessions/{id}/printer`` (a rebind is recorded as REASSIGNED server-side).
+    """
+    if not printers:
+        return (
+            '<section class="printer-picker printer-picker-empty">'
+            '<p class="printer-picker-hint">No printers — '
+            '<a href="/">import a printer definition on the home page</a>.</p>'
+            "</section>"
+        )
+    options: list[str] = []
+    for candidate in printers:
+        selected = " selected" if printer is not None and candidate.id == printer.id else ""
+        options.append(
+            f'<option value="{escape(candidate.id)}"{selected}>'
+            f"{escape(candidate.name)}</option>"
+        )
+    submit_label = "Change printer" if printer is not None else "Bind"
+    return (
+        '<section class="printer-picker">'
+        f'<form class="printer-bind-form" method="post" '
+        f'action="/sessions/{escape(session.id)}/printer">'
+        '<label class="printer-picker-label" for="printer-select">Printer</label>'
+        '<select id="printer-select" name="printer_id">'
+        f'{"".join(options)}</select>'
+        f'<button type="submit" class="printer-bind">{submit_label}</button>'
+        "</form></section>"
+    )
+
+
 def _emergency_stop(printer: Printer | None) -> str:
     """Render the emergency-stop control, present only while a printer is connected."""
     if printer is None:
@@ -213,6 +249,7 @@ def render_session_view(
     messages: list[Message],
     artifacts: list[Artifact],
     printer: Printer | None,
+    printers: list[Printer],
     auth: AuthConfig,
 ) -> str:
     """Render the session working surface: conversation, composer, attachments, printer strip."""
@@ -230,6 +267,7 @@ def render_session_view(
         f"{_emergency_stop(printer)}"
         "</header>"
         f"{_printer_strip(session, printer)}"
+        f"{_printer_picker(session, printer, printers)}"
         '<section class="approval-slot" id="approval-slot" aria-live="polite"></section>'
         f'<main class="conversation" id="conversation" aria-live="polite">{conversation}</main>'
         f'<section class="attachments" id="attachments">{attachments}</section>'

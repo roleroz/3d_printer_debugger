@@ -11,6 +11,7 @@ import asyncio
 import io
 import json
 import logging
+import urllib.parse
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -18,14 +19,14 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, BinaryIO, Callable, Iterator
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..kb.models import IngestOutcome
 from ..store.artifact_store import ArtifactStore, artifact_key
 from ..store.errors import ArtifactNotFoundError
-from ..store.models import ArtifactKind, MessageRole
+from ..store.models import ArtifactKind, BindingReason, MessageRole
 from ..store.structured_store import StructuredStore
 from . import templates
 from .security import AuthConfig, authorize, csrf_ok
@@ -164,6 +165,7 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                 store.list_messages(session_id),
                 store.list_artifacts(session_id),
                 printer,
+                store.list_printers(),
                 context.auth,
             )
         )
@@ -324,6 +326,46 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
             return JSONResponse({"error": "name must not be empty"}, status_code=400)
         store.rename_session(session_id, name)
         return JSONResponse({"ok": True, "name": name})
+
+    @app.post("/sessions/{session_id}/printer")
+    async def bind_session_printer(session_id: str, request: Request) -> Response:
+        # Accept both a plain HTML form submit (urlencoded) and a JSON fetch. The form path
+        # returns a 303 back to the session page so the reload shows the new binding; the JSON
+        # path returns the binding as JSON. Errors always answer with a status code + reason.
+        content_type = request.headers.get("content-type", "")
+        is_form = content_type.startswith(
+            ("application/x-www-form-urlencoded", "multipart/form-data")
+        )
+        wants_html = is_form or "text/html" in request.headers.get("accept", "")
+        body = await request.body()
+        if is_form:
+            parsed = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"))
+            values = parsed.get("printer_id")
+            printer_id = (values[0] if values else "").strip()
+        else:
+            try:
+                data = json.loads(body) if body else {}
+            except (ValueError, json.JSONDecodeError):
+                data = {}
+            printer_id = str(data.get("printer_id") or "").strip()
+        if not printer_id:
+            return JSONResponse({"error": "printer_id must not be empty"}, status_code=400)
+        session = store.get_session(session_id)
+        if session is None:
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        if store.get_printer(printer_id) is None:
+            return JSONResponse({"error": "printer not found"}, status_code=404)
+        reason = (
+            BindingReason.REASSIGNED
+            if session.printer_id and session.printer_id != printer_id
+            else BindingReason.CHOSEN
+        )
+        store.bind_printer(session_id, printer_id, reason)
+        if wants_html:
+            return RedirectResponse(f"/sessions/{session_id}", status_code=303)
+        return JSONResponse(
+            {"ok": True, "printer_id": printer_id, "reason": reason.value}
+        )
 
     @app.post("/sessions/{session_id}/close")
     async def close_session(session_id: str) -> dict:

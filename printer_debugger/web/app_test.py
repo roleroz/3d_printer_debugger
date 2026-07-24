@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from printer_debugger.kb.models import IngestOutcome
 from printer_debugger.store.db import Database
-from printer_debugger.store.models import PrinterStatus
+from printer_debugger.store.models import BindingReason, PrinterStatus
 from printer_debugger.store.structured_store import StructuredStore
 from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode
@@ -351,6 +351,92 @@ class ExposedModeTest(AppTestBase):
             headers={"X-Auth-Subject": "me@example.com", "Origin": "https://app.example"},
         )
         self.assertEqual(response.status_code, 200)
+
+
+class PrinterBindingTest(AppTestBase):
+    """POST /sessions/{id}/printer binds/rebinds a session, validating inputs and form-vs-JSON."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.context = AppContext(store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL))
+        self.client = self._client(self.context)
+        self.printer_a = self.store.create_printer(
+            name="Voron", kb_section="s", kb_content_hash="h", status=PrinterStatus.COMPLETE
+        )
+        self.printer_b = self.store.create_printer(
+            name="Prusa", kb_section="s", kb_content_hash="h", status=PrinterStatus.COMPLETE
+        )
+
+    def test_binds_unbound_session_as_chosen(self) -> None:
+        """A JSON bind of an unbound session sets printer_id and records the reason as CHOSEN."""
+        session = self.store.create_session(name="s")
+        response = self.client.post(
+            f"/sessions/{session.id}/printer", json={"printer_id": self.printer_a.id}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason"], "chosen")
+        bound = self.store.get_session(session.id)
+        assert bound is not None
+        self.assertEqual(bound.printer_id, self.printer_a.id)
+        self.assertEqual(self.store.list_bindings(session.id)[-1].reason, BindingReason.CHOSEN)
+
+    def test_rebinds_to_a_different_printer_as_reassigned(self) -> None:
+        """Rebinding an already-bound session to another printer records REASSIGNED."""
+        session = self.store.create_session(name="s", printer_id=self.printer_a.id)
+        response = self.client.post(
+            f"/sessions/{session.id}/printer", json={"printer_id": self.printer_b.id}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason"], "reassigned")
+        bound = self.store.get_session(session.id)
+        assert bound is not None
+        self.assertEqual(bound.printer_id, self.printer_b.id)
+        self.assertEqual(
+            self.store.list_bindings(session.id)[-1].reason, BindingReason.REASSIGNED
+        )
+
+    def test_form_submit_redirects_to_session_page(self) -> None:
+        """A urlencoded form submit binds and returns a 303 redirect back to the session page."""
+        session = self.store.create_session(name="s")
+        response = self.client.post(
+            f"/sessions/{session.id}/printer",
+            data={"printer_id": self.printer_a.id},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], f"/sessions/{session.id}")
+        bound = self.store.get_session(session.id)
+        assert bound is not None
+        self.assertEqual(bound.printer_id, self.printer_a.id)
+
+    def test_unknown_printer_is_404(self) -> None:
+        """A bind to a non-existent printer id returns 404 and leaves the session unbound."""
+        session = self.store.create_session(name="s")
+        response = self.client.post(
+            f"/sessions/{session.id}/printer", json={"printer_id": "prn_missing"}
+        )
+        self.assertEqual(response.status_code, 404)
+        bound = self.store.get_session(session.id)
+        assert bound is not None
+        self.assertIsNone(bound.printer_id)
+
+    def test_unknown_session_is_404(self) -> None:
+        """A bind targeting a session that does not exist returns 404."""
+        response = self.client.post(
+            "/sessions/ses_missing/printer", json={"printer_id": self.printer_a.id}
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_empty_printer_id_is_400(self) -> None:
+        """A whitespace-only printer_id is rejected with 400 and binds nothing."""
+        session = self.store.create_session(name="s")
+        response = self.client.post(
+            f"/sessions/{session.id}/printer", json={"printer_id": "  "}
+        )
+        self.assertEqual(response.status_code, 400)
+        bound = self.store.get_session(session.id)
+        assert bound is not None
+        self.assertIsNone(bound.printer_id)
 
 
 if __name__ == "__main__":
