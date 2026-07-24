@@ -192,11 +192,12 @@
   function wireCamera(sessionId) {
     const input = document.getElementById("camera-input");
     if (!input) return;
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const file = input.files && input.files[0];
       if (!file) return;
       previewImage(file);
-      uploadWithProgress(sessionId, file, "photo");
+      const upload = await prepareImageForUpload(file);
+      uploadWithProgress(sessionId, upload, "photo");
       input.value = "";
     });
   }
@@ -204,12 +205,95 @@
   function wireFileAttach(sessionId) {
     const input = document.getElementById("file-input");
     if (!input) return;
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const file = input.files && input.files[0];
       if (!file) return;
-      uploadWithProgress(sessionId, file, "file");
+      // Only images are re-encoded; .gcode/.3mf files upload byte-for-byte.
+      const upload =
+        file.type && file.type.startsWith("image/")
+          ? await prepareImageForUpload(file)
+          : file;
+      uploadWithProgress(sessionId, upload, "file");
       input.value = "";
     });
+  }
+
+  // --- Image downscaling: bound the longest edge to 2048px and re-encode as JPEG q0.9 ---------
+  const MAX_EDGE = 2048;
+  const JPEG_QUALITY = 0.9;
+
+  async function prepareImageForUpload(file) {
+    if (!file.type || !file.type.startsWith("image/")) return file;
+    try {
+      const blob = await downscaleImage(file);
+      if (!blob) return file;
+      const name = jpgName(file.name);
+      try {
+        return new File([blob], name, { type: "image/jpeg" });
+      } catch (e) {
+        blob.name = name; // Some browsers lack the File constructor; tag the Blob instead.
+        return blob;
+      }
+    } catch (err) {
+      // A format the browser cannot decode: fall back to the original file (part b reports any
+      // resulting upload failure). Log so the silent-failure case leaves a trace.
+      console.error("Image downscale failed; uploading the original file.", err);
+      return file;
+    }
+  }
+
+  function downscaleImage(file) {
+    return new Promise((resolve, reject) => {
+      const render = (width, height, paint) => {
+        const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
+        const w = Math.max(1, Math.round(width * scale));
+        const h = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("no 2d canvas context"));
+          return;
+        }
+        paint(ctx, w, h);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("toBlob returned null"))),
+          "image/jpeg",
+          JPEG_QUALITY
+        );
+      };
+      if (window.createImageBitmap) {
+        createImageBitmap(file).then((bitmap) => {
+          render(bitmap.width, bitmap.height, (ctx, w, h) => {
+            ctx.drawImage(bitmap, 0, 0, w, h);
+            if (bitmap.close) bitmap.close();
+          });
+        }, reject);
+      } else {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          try {
+            render(img.naturalWidth || img.width, img.naturalHeight || img.height, (ctx, w, h) => {
+              ctx.drawImage(img, 0, 0, w, h);
+            });
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("image decode failed"));
+        };
+        img.src = url;
+      }
+    });
+  }
+
+  function jpgName(name) {
+    if (!name) return "photo.jpg";
+    return name.replace(/\.[^.]+$/, "") + ".jpg";
   }
 
   function previewImage(file) {
@@ -244,22 +328,46 @@
       if (event.lengthComputable && bar) bar.value = (event.loaded / event.total) * 100;
     });
     xhr.addEventListener("load", () => {
-      if (label) {
-        label.textContent =
-          xhr.status === 413
-            ? "File too large — rejected before upload finished."
-            : xhr.status >= 400
-            ? "Upload failed (" + xhr.status + ")."
-            : "Uploaded " + (file.name || kind) + ".";
+      if (xhr.status >= 400) {
+        if (label) {
+          label.textContent =
+            xhr.status === 413
+              ? "File too large — rejected before upload finished."
+              : "Upload failed (" + xhr.status + ").";
+        }
+        // A tiny label is not enough: post a visible system message with the reason.
+        appendMessage("system", uploadFailureText(file, kind, xhr.status, failureReason(xhr)));
+      } else {
+        if (label) label.textContent = "Uploaded " + (file.name || kind) + ".";
+        if (bar) bar.value = 100;
       }
-      if (bar && xhr.status < 400) bar.value = 100;
       hideLater(wrap);
     });
     xhr.addEventListener("error", () => {
       if (label) label.textContent = "Upload failed.";
+      appendMessage("system", uploadFailureText(file, kind, 0, "the connection dropped"));
       hideLater(wrap);
     });
     xhr.send(file);
+  }
+
+  function failureReason(xhr) {
+    try {
+      const data = JSON.parse(xhr.responseText);
+      if (data && data.error) return data.error;
+    } catch (e) {
+      // Not a JSON body; fall through to the raw text.
+    }
+    return xhr.responseText || "";
+  }
+
+  function uploadFailureText(file, kind, status, reason) {
+    const isImage = kind === "photo" || (file.type && file.type.startsWith("image/"));
+    const what = isImage ? "photo" : "file";
+    let msg = "The " + what + " " + (file.name ? '"' + file.name + '" ' : "") + "failed to upload";
+    if (status) msg += " (status " + status + ")";
+    if (reason) msg += ": " + reason;
+    return msg + ".";
   }
 
   function hideLater(wrap) {

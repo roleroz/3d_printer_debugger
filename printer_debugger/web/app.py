@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -27,6 +28,8 @@ from ..store.structured_store import StructuredStore
 from . import templates
 from .security import AuthConfig, authorize, csrf_ok
 from .sse import SseHub
+
+logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_TYPES = {"app.js": "application/javascript", "styles.css": "text/css"}
@@ -174,39 +177,69 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
     @app.post("/sessions/{session_id}/files")
     async def upload_file(session_id: str, request: Request) -> Response:
         declared = request.headers.get("Content-Length")
+        content_type = request.headers.get("Content-Type", "application/octet-stream")
+        filename = request.headers.get("X-Filename", "")
         if declared is not None and int(declared) > context.max_upload_bytes:
+            logger.warning(
+                "upload rejected as too large: session=%s filename=%s content_type=%s "
+                "declared=%s limit=%s",
+                session_id, filename, content_type, declared, context.max_upload_bytes,
+            )
             return JSONResponse(
                 {"error": "file too large",
                  "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
                 status_code=413,
             )
-        content_type = request.headers.get("Content-Type", "application/octet-stream")
-        filename = request.headers.get("X-Filename", "")
         body = await request.body()
         kind = _kind_for_upload(filename, content_type)
-        artifact = _store_upload(context, session_id, body, kind, content_type)
-        # Build any index the file needs synchronously, while the request is still open
-        # ([decisions.md 2026-07-23]): a G-code index is stored now; a .3mf is stored whole.
-        if context.on_upload is not None:
-            context.on_upload(artifact, body)
+        try:
+            artifact = _store_upload(context, session_id, body, kind, content_type)
+            # Build any index the file needs synchronously, while the request is still open
+            # ([decisions.md 2026-07-23]): a G-code index is stored now; a .3mf is stored whole.
+            if context.on_upload is not None:
+                context.on_upload(artifact, body)
+        except Exception:
+            logger.exception(
+                "upload failed: session=%s filename=%s content_type=%s size=%d",
+                session_id, filename, content_type, len(body),
+            )
+            return JSONResponse(
+                {"error": "the upload could not be stored on the server"},
+                status_code=500,
+            )
         return JSONResponse({"artifact_id": artifact.id, "size": len(body), "kind": kind.value})
 
     @app.post("/sessions/{session_id}/audio")
     async def upload_audio(session_id: str, request: Request) -> Response:
         declared = request.headers.get("Content-Length")
+        content_type = request.headers.get("Content-Type", "audio/webm")
         if declared is not None and int(declared) > context.max_upload_bytes:
+            logger.warning(
+                "audio upload rejected as too large: session=%s content_type=%s "
+                "declared=%s limit=%s",
+                session_id, content_type, declared, context.max_upload_bytes,
+            )
             return JSONResponse(
                 {"error": "file too large",
                  "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
                 status_code=413,
             )
-        content_type = request.headers.get("Content-Type", "audio/webm")
         body = await request.body()
         # Whisper transcription is deferred; the clip is stored and marked pending.
-        artifact = _store_upload(
-            context, session_id, body, ArtifactKind.AUDIO, content_type,
-            note="transcription pending",
-        )
+        try:
+            artifact = _store_upload(
+                context, session_id, body, ArtifactKind.AUDIO, content_type,
+                note="transcription pending",
+            )
+        except Exception:
+            logger.exception(
+                "audio upload failed: session=%s content_type=%s size=%d",
+                session_id, content_type, len(body),
+            )
+            return JSONResponse(
+                {"error": "the audio clip could not be stored on the server"},
+                status_code=500,
+            )
         return JSONResponse(
             {"artifact_id": artifact.id, "size": len(body), "transcription": "pending"}
         )

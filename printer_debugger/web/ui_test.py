@@ -138,6 +138,15 @@ class StaticAssetTest(UiTestBase):
         """An unlisted static path returns 404 rather than reading an arbitrary file."""
         self.assertEqual(self.client.get("/static/secret.py").status_code, 404)
 
+    def test_app_js_downscales_images_and_reports_failures(self) -> None:
+        """app.js re-encodes images to bounded JPEG and posts a visible upload-failure message."""
+        js = self.client.get("/static/app.js").text
+        self.assertIn("prepareImageForUpload", js)
+        self.assertIn("image/jpeg", js)
+        self.assertIn("2048", js)  # MAX_EDGE bound on the longest edge.
+        self.assertIn("uploadFailureText", js)
+        self.assertIn('appendMessage("system"', js)
+
 
 class ArtifactServingTest(UiTestBase):
     """Artifacts are served as their stored bytes with the stored content type."""

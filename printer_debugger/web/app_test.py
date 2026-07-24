@@ -166,6 +166,61 @@ class PrinterImportTest(AppTestBase):
         self.assertEqual(response.status_code, 503)
 
 
+class UploadFailureReportingTest(AppTestBase):
+    """File uploads log and report failures instead of dying silently."""
+
+    _LOGGER = "printer_debugger.web.app"
+
+    def test_failed_upload_logs_and_returns_500(self) -> None:
+        """A raising index step is logged at ERROR and returns a 500 with a readable reason."""
+
+        def boom(artifact: object, body: bytes) -> None:
+            raise RuntimeError("index build blew up")
+
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL),
+            on_upload=boom, max_upload_bytes=1000,
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        with self.assertLogs(self._LOGGER, level="ERROR") as logs:
+            response = client.post(
+                f"/sessions/{session.id}/files", content=b"\x89PNGdata",
+                headers={"Content-Type": "image/png", "X-Filename": "p.jpg"},
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("error", response.json())
+        self.assertTrue(any("upload failed" in line for line in logs.output))
+
+    def test_too_large_upload_logs_warning(self) -> None:
+        """An oversized declared upload returns 413 and logs a warning with context."""
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL), max_upload_bytes=10
+        )
+        client = self._client(context)
+        with self.assertLogs(self._LOGGER, level="WARNING") as logs:
+            response = client.post(
+                "/sessions/s/files", content=b"x" * 50,
+                headers={"Content-Type": "image/png", "X-Filename": "big.jpg"},
+            )
+        self.assertEqual(response.status_code, 413)
+        self.assertTrue(any("too large" in line for line in logs.output))
+
+    def test_normal_photo_upload_succeeds(self) -> None:
+        """A normal photo upload with no failure still returns 200 with the artifact id."""
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL), max_upload_bytes=1000
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        response = client.post(
+            f"/sessions/{session.id}/files", content=b"\x89PNGdata",
+            headers={"Content-Type": "image/png", "X-Filename": "p.jpg"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("artifact_id", response.json())
+
+
 class ExposedModeTest(AppTestBase):
     """Exposed mode enforces auth and the CSRF defense on mutating routes."""
 
