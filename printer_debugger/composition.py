@@ -30,7 +30,7 @@ from .orchestration import prompt
 from .orchestration.gate import ApprovalGate, Proposal
 from .orchestration.prompt import PromptInputs
 from .orchestration.sdk_client import ClaudeAgentClient
-from .orchestration.turn import AgentEvent, TextEvent, ToolStartEvent, TurnLoop
+from .orchestration.turn import AgentEvent, ErrorEvent, TextEvent, ToolStartEvent, TurnLoop
 from .procedures import catalog as procedures_catalog
 from .store.artifact_store import ArtifactStore, artifact_key, index_key
 from .store.errors import ArtifactNotFoundError
@@ -490,6 +490,10 @@ def _forward_event(hub: SseHub, session_id: str, event: AgentEvent) -> None:
             hub.publish(session_id, "assistant", {"text": event.text})
     elif isinstance(event, ToolStartEvent):
         hub.publish(session_id, "tool", {"server": event.server, "tool": event.tool})
+    elif isinstance(event, ErrorEvent):
+        # A distinct channel; not "error", which EventSource reserves for its connection-error
+        # event (that would trip the client's reconnect handler instead of rendering the message).
+        hub.publish(session_id, "agent_error", {"message": event.message})
 
 
 def make_artifact_reader(

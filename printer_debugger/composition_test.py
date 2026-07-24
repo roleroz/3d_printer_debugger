@@ -458,6 +458,32 @@ class OnMessageTurnTest(_StoreFixture):
         self.assertIn("tool", kinds)
 
 
+class ForwardEventTest(unittest.TestCase):
+    """_forward_event publishes each turn event to the session's viewers on the right channel."""
+
+    def test_error_event_published_on_agent_error_channel(self) -> None:
+        """An ErrorEvent is published on the 'agent_error' channel carrying its message."""
+        from printer_debugger.web.sse import SseHub
+
+        hub = SseHub()
+        composition._forward_event(
+            hub, "s1", turn.ErrorEvent("The agent turn failed (subtype=error_max_turns)")
+        )
+        events = hub.missed_since("s1", 0)
+        self.assertEqual([e.kind for e in events], ["agent_error"])
+        self.assertIn("error_max_turns", events[0].data["message"])
+
+    def test_text_event_still_published_on_assistant_channel(self) -> None:
+        """A TextEvent still publishes on the 'assistant' channel (existing behaviour preserved)."""
+        from printer_debugger.web.sse import SseHub
+
+        hub = SseHub()
+        composition._forward_event(hub, "s1", turn.TextEvent("looking..."))
+        events = hub.missed_since("s1", 0)
+        self.assertEqual([e.kind for e in events], ["assistant"])
+        self.assertEqual(events[0].data["text"], "looking...")
+
+
 class ApproveBridgeTest(_StoreFixture):
     """The approve bridge publishes a proposal, routes the vote through resolve, and records it."""
 

@@ -12,6 +12,7 @@ from ..store.models import TokenUsage
 from .turn import (
     AgentEvent,
     AssistantMessageEvent,
+    ErrorEvent,
     TextEvent,
     ToolResultEvent,
     ToolStartEvent,
@@ -36,7 +37,7 @@ def translate_message(message: Any) -> list[AgentEvent]:
     if kind == "UserMessage":
         return _tool_results(message)
     if kind == "ResultMessage":
-        return _usage(message)
+        return _result(message)
     return []
 
 
@@ -79,18 +80,67 @@ def _tool_results(message: Any) -> list[AgentEvent]:
     return events
 
 
-def _usage(message: Any) -> list[AgentEvent]:
-    usage = getattr(message, "usage", None) or {}
-    return [
-        UsageEvent(
-            usage=TokenUsage(
-                input_tokens=int(usage.get("input_tokens", 0)),
-                output_tokens=int(usage.get("output_tokens", 0)),
-                cache_read_tokens=int(usage.get("cache_read_input_tokens", 0)),
-                cache_creation_tokens=int(usage.get("cache_creation_input_tokens", 0)),
+def _result(message: Any) -> list[AgentEvent]:
+    """A ``ResultMessage`` yields an ``ErrorEvent`` when the turn failed, then usage if present.
+
+    A failed turn (an API error, a server that could not start, a permission denial, ``max_turns``,
+    an abort, …) previously produced only a ``UsageEvent`` and so was invisible; now it also emits a
+    concise ``ErrorEvent`` describing the failure so the user and the console can see it.
+    """
+    events: list[AgentEvent] = []
+    error = _error_message(message)
+    if error is not None:
+        events.append(ErrorEvent(message=error))
+    usage = getattr(message, "usage", None)
+    if usage is not None:
+        events.append(
+            UsageEvent(
+                usage=TokenUsage(
+                    input_tokens=int(usage.get("input_tokens", 0)),
+                    output_tokens=int(usage.get("output_tokens", 0)),
+                    cache_read_tokens=int(usage.get("cache_read_input_tokens", 0)),
+                    cache_creation_tokens=int(usage.get("cache_creation_input_tokens", 0)),
+                )
             )
         )
-    ]
+    return events
+
+
+def _error_message(message: Any) -> str | None:
+    """Build a human failure message for a ``ResultMessage``, or None when the turn succeeded.
+
+    A turn is failed when ``is_error`` is set, the ``subtype`` is present but not ``"success"``, or
+    ``terminal_reason`` indicates an abort. The message is assembled from whichever diagnostic
+    fields are available, omitting the empty ones.
+    """
+    subtype = str(getattr(message, "subtype", "") or "")
+    is_error = bool(getattr(message, "is_error", False))
+    terminal = getattr(message, "terminal_reason", None)
+    subtype_failed = subtype not in ("", "success")
+    if not (is_error or subtype_failed or _indicates_abort(terminal)):
+        return None
+    status = getattr(message, "api_error_status", None)
+    errors = getattr(message, "errors", None)
+    result = getattr(message, "result", None)
+    parts: list[str] = []
+    if subtype:
+        parts.append(f"subtype={subtype}")
+    if status is not None:
+        parts.append(f"status={status}")
+    if terminal:
+        parts.append(f"terminal={terminal}")
+    detail = "; ".join(str(e) for e in errors) if errors else str(result or "")
+    head = "The agent turn failed"
+    if parts:
+        head += " (" + ", ".join(parts) + ")"
+    if detail:
+        head += f": {detail}"
+    return head
+
+
+def _indicates_abort(terminal_reason: Any) -> bool:
+    """Whether a ``terminal_reason`` names an abort/cancellation rather than a clean finish."""
+    return bool(terminal_reason) and "abort" in str(terminal_reason).lower()
 
 
 def _serialise_blocks(content: list[Any]) -> list[dict[str, Any]]:

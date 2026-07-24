@@ -139,6 +139,22 @@ class TurnLoopTest(unittest.TestCase):
         self.assertEqual(refreshed.input_tokens, 100)
         self.assertEqual(refreshed.output_tokens, 50)
 
+    def test_error_event_is_forwarded_and_persisted(self) -> None:
+        """An ErrorEvent is passed to on_event and persisted as an assistant message on reload."""
+        seen: list = []
+        events = [turn.ErrorEvent("The agent turn failed (subtype=error_max_turns)")]
+        loop = turn.TurnLoop(
+            self.store, _FakeAgentClient(events), on_event=lambda e: seen.append(e)
+        )
+        asyncio.run(loop.run(self.session.id, [{"type": "text", "text": "why?"}]))
+
+        self.assertTrue(any(isinstance(e, turn.ErrorEvent) for e in seen))
+        messages = self.store.list_messages(self.session.id)
+        self.assertEqual([m.role.value for m in messages], ["user", "assistant"])
+        text = messages[-1].content[0]["text"]
+        self.assertIn("error_max_turns", text)
+        self.assertTrue(text.startswith("⚠️"))
+
 
 class SessionNamingTest(unittest.TestCase):
     """Session creation names from opening content via the injectable namer."""

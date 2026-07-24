@@ -9,11 +9,16 @@ decision logic here is hermetically tested; the streaming glue is exercised by a
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from . import sdk_config
 from .sdk_translate import translate_message
-from .turn import AgentEvent
+from .turn import AgentEvent, ErrorEvent, TextEvent
+
+logger = logging.getLogger(__name__)
+
+_DETAIL_LIMIT = 500
 
 # approve(command, danger_flags) -> whether the human approved. The composition root wires this to
 # the ApprovalGate (publish + await + record); a rejection or timeout returns False.
@@ -151,8 +156,45 @@ class ClaudeAgentClient:
                 "parent_tool_use_id": None,
             }
 
-        async for message in query(prompt=_input_stream(), options=options):
-            for event in translate_message(message):
-                yield event
-            if type(message).__name__ == "ResultMessage":
-                break
+        produced_text = False
+        try:
+            async for message in query(prompt=_input_stream(), options=options):
+                if type(message).__name__ == "ResultMessage":
+                    _log_result(message)
+                for event in translate_message(message):
+                    if isinstance(event, TextEvent):
+                        produced_text = True
+                    yield event
+                if type(message).__name__ == "ResultMessage":
+                    break
+        except Exception as exc:  # a raised SDK error must become a visible message, not a 500.
+            logger.exception("run_turn failed")
+            yield ErrorEvent(message=f"The agent turn crashed: {type(exc).__name__}: {exc}")
+            return
+        if not produced_text:
+            logger.warning("run_turn: turn produced no assistant text")
+
+
+def _log_result(message: Any) -> None:  # pragma: no cover - live path; needs the SDK
+    """Log a turn's ``ResultMessage`` (WARNING when it indicates an error, else INFO)."""
+    is_error = bool(getattr(message, "is_error", False))
+    subtype = getattr(message, "subtype", None)
+    errors = getattr(message, "errors", None)
+    result = getattr(message, "result", None)
+    detail = "; ".join(str(e) for e in errors) if errors else str(result or "")
+    if len(detail) > _DETAIL_LIMIT:
+        detail = detail[:_DETAIL_LIMIT] + "…"
+    failed = is_error or (subtype is not None and subtype != "success")
+    log = logger.warning if failed else logger.info
+    log(
+        "run_turn ResultMessage: subtype=%s is_error=%s stop_reason=%s terminal_reason=%s "
+        "api_error_status=%s num_turns=%s duration_ms=%s detail=%s",
+        subtype,
+        is_error,
+        getattr(message, "stop_reason", None),
+        getattr(message, "terminal_reason", None),
+        getattr(message, "api_error_status", None),
+        getattr(message, "num_turns", None),
+        getattr(message, "duration_ms", None),
+        detail,
+    )

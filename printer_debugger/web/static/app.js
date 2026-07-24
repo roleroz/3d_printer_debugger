@@ -504,6 +504,7 @@
     source.addEventListener("proposal", onProposalEvent);
     source.addEventListener("approval_resolved", onApprovalResolved);
     source.addEventListener("printer", onPrinterEvent);
+    source.addEventListener("agent_error", onAgentErrorEvent);
     source.addEventListener("error", () => {
       // Reconnect from the last position so backgrounding does not lose output (web.md §10).
       if (source) source.close();
@@ -520,6 +521,15 @@
     trackId(event);
     const data = parseData(event.data);
     if (data && (data.text || data.content)) appendMessage("assistant", data.text || data.content);
+  }
+
+  // A failed agent turn arrives on its own channel (never the reserved "error" event) and is
+  // shown as a visible system message so a failure is no longer silent.
+  function onAgentErrorEvent(event) {
+    trackId(event);
+    const data = parseData(event.data);
+    const message = data && data.message ? data.message : "The agent turn failed.";
+    appendMessage("system", "⚠️ " + message);
   }
 
   function onToolEvent(event) {

@@ -55,7 +55,21 @@ class UsageEvent:
     usage: TokenUsage
 
 
-AgentEvent = TextEvent | ToolStartEvent | ToolResultEvent | AssistantMessageEvent | UsageEvent
+@dataclass(frozen=True, slots=True)
+class ErrorEvent:
+    """A turn failure surfaced to the user (streamed) and persisted so it survives a reload."""
+
+    message: str
+
+
+AgentEvent = (
+    TextEvent
+    | ToolStartEvent
+    | ToolResultEvent
+    | AssistantMessageEvent
+    | UsageEvent
+    | ErrorEvent
+)
 
 
 class AgentClient(Protocol):
@@ -109,3 +123,11 @@ class TurnLoop:
             self._store.add_message(session_id, MessageRole.ASSISTANT, event.content)
         elif isinstance(event, UsageEvent):
             self._store.accumulate_usage(session_id, event.usage)
+        elif isinstance(event, ErrorEvent):
+            # ``self._on_event`` already forwarded it to viewers in ``run``; persist it as an
+            # assistant text block so a reloaded conversation still shows why the turn failed.
+            self._store.add_message(
+                session_id,
+                MessageRole.ASSISTANT,
+                [{"type": "text", "text": f"⚠️ {event.message}"}],
+            )

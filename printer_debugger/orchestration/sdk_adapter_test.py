@@ -14,6 +14,7 @@ from printer_debugger.orchestration.sdk_client import (
 )
 from printer_debugger.orchestration.turn import (
     AssistantMessageEvent,
+    ErrorEvent,
     TextEvent,
     ToolResultEvent,
     ToolStartEvent,
@@ -48,8 +49,26 @@ class UserMessage:
 
 
 class ResultMessage:
-    def __init__(self, usage: dict) -> None:
+    def __init__(
+        self,
+        usage: dict | None = None,
+        *,
+        subtype: str = "success",
+        is_error: bool = False,
+        stop_reason: str | None = None,
+        result: str | None = None,
+        errors: list[str] | None = None,
+        api_error_status: int | None = None,
+        terminal_reason: str | None = None,
+    ) -> None:
         self.usage = usage
+        self.subtype = subtype
+        self.is_error = is_error
+        self.stop_reason = stop_reason
+        self.result = result
+        self.errors = errors
+        self.api_error_status = api_error_status
+        self.terminal_reason = terminal_reason
 
 
 class ConfigTest(unittest.TestCase):
@@ -147,6 +166,45 @@ class TranslateTest(unittest.TestCase):
         )
         self.assertIsInstance(usage[0], UsageEvent)
         self.assertEqual(usage[0].usage.input_tokens, 120)
+
+    def test_success_result_yields_only_usage(self) -> None:
+        """A successful ResultMessage emits a UsageEvent and no ErrorEvent."""
+        events = sdk_translate.translate_message(
+            ResultMessage({"input_tokens": 5, "output_tokens": 2}, subtype="success")
+        )
+        self.assertTrue(all(not isinstance(e, ErrorEvent) for e in events))
+        self.assertTrue(any(isinstance(e, UsageEvent) for e in events))
+
+    def test_is_error_result_yields_error_and_usage(self) -> None:
+        """An is_error ResultMessage emits an ErrorEvent reflecting the fields, plus usage."""
+        events = sdk_translate.translate_message(
+            ResultMessage(
+                {"input_tokens": 5, "output_tokens": 0},
+                subtype="error_during_execution",
+                is_error=True,
+                api_error_status=529,
+                errors=["overloaded"],
+            )
+        )
+        error = next(e for e in events if isinstance(e, ErrorEvent))
+        self.assertIn("subtype=error_during_execution", error.message)
+        self.assertIn("status=529", error.message)
+        self.assertIn("overloaded", error.message)
+        self.assertTrue(any(isinstance(e, UsageEvent) for e in events))
+
+    def test_non_success_subtype_yields_error(self) -> None:
+        """A non-"success" subtype (e.g. max-turns) emits an ErrorEvent even without is_error."""
+        events = sdk_translate.translate_message(
+            ResultMessage(
+                {"input_tokens": 1, "output_tokens": 0},
+                subtype="error_max_turns",
+                is_error=False,
+                result="reached the turn limit",
+            )
+        )
+        error = next(e for e in events if isinstance(e, ErrorEvent))
+        self.assertIn("subtype=error_max_turns", error.message)
+        self.assertIn("reached the turn limit", error.message)
 
 
 class InlineImageBlocksTest(unittest.TestCase):
