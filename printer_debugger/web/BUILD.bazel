@@ -9,6 +9,7 @@ py_library(
         "sse.py",
         "startup.py",
         "templates.py",
+        "transcription.py",
     ],
     data = glob(["static/*"]),
     imports = ["../.."],

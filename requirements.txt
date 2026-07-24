@@ -18,6 +18,11 @@ numpy
 # by the MCP wrapper and the orchestrator; exercised live, not in the hermetic suite).
 claude-agent-sdk
 
+# Voice transcription — the bundled faster-whisper `base` model transcribes uploaded clips
+# server-side ([decisions.md 2026-07-23]). Lazy-imported by the Transcriber and depended on only by
+# //printer_debugger:main / //:image, so `bazel test //...` never fetches the heavy wheels.
+faster-whisper
+
 # Procedures — the calibration catalog documents are YAML data loaded at startup.
 PyYAML
 

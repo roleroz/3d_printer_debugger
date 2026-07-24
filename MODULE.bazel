@@ -35,3 +35,43 @@ pip.parse(
     requirements_lock = "//:requirements.lock.txt",
 )
 use_repo(pip, "pypi")
+
+# The faster-whisper `base` model, bundled hermetically so transcription works offline in the
+# container ([decisions.md 2026-07-23]). Each CTranslate2 model file is pinned by sha256 to a
+# specific HuggingFace revision of Systran/faster-whisper-base. Only //:whisper_model_layer (the
+# image) references these, so `bazel test //...` never downloads them.
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+_WHISPER_BASE_REV = "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66"
+
+http_file(
+    name = "whisper_base_config",
+    downloaded_file_path = "config.json",
+    sha256 = "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+    urls = ["https://huggingface.co/Systran/faster-whisper-base/resolve/" +
+            _WHISPER_BASE_REV + "/config.json"],
+)
+
+http_file(
+    name = "whisper_base_model_bin",
+    downloaded_file_path = "model.bin",
+    sha256 = "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+    urls = ["https://huggingface.co/Systran/faster-whisper-base/resolve/" +
+            _WHISPER_BASE_REV + "/model.bin"],
+)
+
+http_file(
+    name = "whisper_base_tokenizer",
+    downloaded_file_path = "tokenizer.json",
+    sha256 = "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+    urls = ["https://huggingface.co/Systran/faster-whisper-base/resolve/" +
+            _WHISPER_BASE_REV + "/tokenizer.json"],
+)
+
+http_file(
+    name = "whisper_base_vocabulary",
+    downloaded_file_path = "vocabulary.txt",
+    sha256 = "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913",
+    urls = ["https://huggingface.co/Systran/faster-whisper-base/resolve/" +
+            _WHISPER_BASE_REV + "/vocabulary.txt"],
+)

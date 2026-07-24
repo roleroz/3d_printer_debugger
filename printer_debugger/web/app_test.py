@@ -221,6 +221,95 @@ class UploadFailureReportingTest(AppTestBase):
         self.assertIn("artifact_id", response.json())
 
 
+class AudioTranscriptionTest(AppTestBase):
+    """The /audio route transcribes via the injected seam and feeds the transcript to a session."""
+
+    _LOGGER = "printer_debugger.web.app"
+
+    def _post_audio(self, client: TestClient, session_id: str) -> object:
+        return client.post(
+            f"/sessions/{session_id}/audio", content=b"webmbytes",
+            headers={"Content-Type": "audio/webm"},
+        )
+
+    def test_transcription_routed_through_on_message(self) -> None:
+        """A successful transcript is returned, stored as the note, and sent to on_message."""
+        seen: list[tuple[str, list[object]]] = []
+
+        async def on_message(session_id: str, content: list[object]) -> None:
+            seen.append((session_id, content))
+
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL),
+            transcribe=lambda body, ct: "level the bed", on_message=on_message,
+            max_upload_bytes=1000,
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        response = self._post_audio(client, session.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["transcription"], "level the bed")
+        self.assertEqual(seen, [(session.id, [{"type": "text", "text": "level the bed"}])])
+        artifacts = self.client_artifacts(client, session.id)
+        self.assertEqual(artifacts[0]["note"], "level the bed")
+
+    def test_transcription_persisted_when_no_on_message(self) -> None:
+        """With no on_message wired the transcript is persisted directly as a user message."""
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL),
+            transcribe=lambda body, ct: "check the nozzle", max_upload_bytes=1000,
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        response = self._post_audio(client, session.id)
+        self.assertEqual(response.status_code, 200)
+        view = client.get(f"/api/sessions/{session.id}").json()
+        self.assertEqual(view["messages"][0]["role"], "user")
+        self.assertEqual(
+            view["messages"][0]["content"], [{"type": "text", "text": "check the nozzle"}]
+        )
+
+    def test_failing_transcriber_is_caught_and_upload_survives(self) -> None:
+        """A raising transcriber is logged, the clip stays stored pending, and status is failed."""
+
+        def boom(body: bytes, content_type: str) -> str:
+            raise RuntimeError("whisper exploded")
+
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL),
+            transcribe=boom, max_upload_bytes=1000,
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        with self.assertLogs(self._LOGGER, level="ERROR") as logs:
+            response = self._post_audio(client, session.id)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["transcription"], "failed")
+        self.assertIn("whisper exploded", data["error"])
+        self.assertTrue(any("transcription failed" in line for line in logs.output))
+        artifacts = self.client_artifacts(client, session.id)
+        self.assertEqual(artifacts[0]["note"], "transcription pending")
+        self.assertEqual(client.get(f"/api/sessions/{session.id}").json()["messages"], [])
+
+    def test_no_transcriber_wired_keeps_pending(self) -> None:
+        """With no transcriber wired the route preserves today's stored-and-pending behavior."""
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL), max_upload_bytes=1000
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        response = self._post_audio(client, session.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["transcription"], "pending")
+        artifacts = self.client_artifacts(client, session.id)
+        self.assertEqual(artifacts[0]["note"], "transcription pending")
+
+    def client_artifacts(self, client: TestClient, session_id: str) -> list[dict]:
+        """Fetch the session's artifact metadata list via the JSON view."""
+        return client.get(f"/api/sessions/{session_id}").json()["artifacts"]
+
+
 class ExposedModeTest(AppTestBase):
     """Exposed mode enforces auth and the CSRF defense on mutating routes."""
 

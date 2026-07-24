@@ -23,6 +23,11 @@ from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode, resolve_mode
 from printer_debugger.web.sse import SseHub
 from printer_debugger.web.startup import format_banner
+from printer_debugger.web.transcription import Transcriber
+
+# Where the hermetically bundled faster-whisper ``base`` model is placed in the image
+# (see //:whisper_model_layer); overridable for local runs via PD_WHISPER_MODEL_DIR.
+_DEFAULT_WHISPER_MODEL_DIR = "/app/whisper-base"
 
 
 def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
@@ -48,6 +53,10 @@ def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
     gate.recover_pending()
 
     kb = KbIngester(store)
+    # The model loads lazily on the first clip, so constructing this never touches the files or
+    # delays startup; --check builds the context without transcribing anything.
+    whisper_model_dir = os.environ.get("PD_WHISPER_MODEL_DIR", _DEFAULT_WHISPER_MODEL_DIR)
+    transcriber = Transcriber(whisper_model_dir)
     catalog_text = composition.load_catalog_text()
     client_factory = composition.make_client_factory(
         store, artifacts, gate, kb, catalog_text, token, model, effort
@@ -65,6 +74,7 @@ def build(data_dir: str) -> tuple[AppContext, StructuredStore]:
         ingest_kb=lambda text: kb.ingest(text),
         resolve_approval=gate.resolve,
         emergency_stop=composition.make_emergency_stop(store),
+        transcribe=transcriber.transcribe,
     )
     return context, store
 

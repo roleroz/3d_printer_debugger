@@ -173,6 +173,23 @@ design. It is maintained across the module commits on the `feature/implementatio
   `bazel test //...` run builds no OCI/image actions. `bazel build //:image` still builds the image
   (and fetches the SDK) explicitly.
 
+- **[build] Bundling the faster-whisper `base` model hermetically.** The transcription path
+  ([decisions.md 2026-07-23 voice transcription]) must run offline in the container, so the model
+  is never downloaded at runtime. The four CTranslate2 model files (`config.json`, `model.bin`,
+  `tokenizer.json`, `vocabulary.txt`, ~140 MB total, `model.bin` dominates) are pinned in
+  `MODULE.bazel` as `http_file` repos, each by `sha256`, against a fixed
+  HuggingFace revision of `Systran/faster-whisper-base`
+  (`ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66`). The root `BUILD.bazel` packs them into a
+  `pkg_tar` (`:whisper_model_layer`) at `/app/whisper-base/*` and adds that layer to `:image`.
+  `main.py` points `Transcriber` at `PD_WHISPER_MODEL_DIR` (default `/app/whisper-base`), and the
+  `Transcriber` loads with `local_files_only=True` so it never reaches the network. Only the image
+  references `:whisper_model_layer`, and `faster_whisper` is depended on only by
+  `//printer_debugger:main` with every import lazy, so `bazel test //...` (with
+  `--build_tests_only`) fetches neither the model files nor the heavy wheels
+  (`ctranslate2`/`onnxruntime`/`av`/`tokenizers`), mirroring the `claude-agent-sdk` handling.
+  To re-pin after a model update, re-download each file from the new revision and update its
+  `sha256` in `MODULE.bazel`.
+
 ## Decisions taken during implementation
 
 - **[store] Timestamp precision is microseconds**, not milliseconds as an early draft implied.

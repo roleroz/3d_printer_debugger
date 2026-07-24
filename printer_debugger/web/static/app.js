@@ -421,11 +421,23 @@
   function submitAudio(sessionId) {
     if (!audioChunks.length) return;
     const blob = new Blob(audioChunks, { type: "audio/webm" });
-    // Transcription (Whisper) is server-side and still deferred; we upload and note it as pending.
-    appendMessage("system", "Audio captured — transcription pending.");
+    // Transcription (Whisper) runs server-side; the server also feeds the transcript to the
+    // session so the agent answers it. We just surface the returned text (or the status).
+    appendMessage("system", "Audio captured — transcribing…");
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/sessions/" + encodeURIComponent(sessionId) + "/audio");
     xhr.setRequestHeader("Content-Type", "audio/webm");
+    xhr.onload = () => {
+      let text = "";
+      try { text = (JSON.parse(xhr.responseText) || {}).transcription || ""; } catch (e) {}
+      if (text && text !== "pending" && text !== "failed") {
+        appendMessage("user", text);
+      } else if (text === "failed") {
+        appendMessage("system", "Transcription failed — the clip was saved.");
+      } else {
+        appendMessage("system", "Transcription pending — the clip was saved.");
+      }
+    };
     xhr.send(blob);
   }
 

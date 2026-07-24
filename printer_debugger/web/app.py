@@ -30,6 +30,7 @@ from ..store.structured_store import StructuredStore
 from . import templates
 from .security import AuthConfig, authorize, csrf_ok
 from .sse import SseHub
+from .transcription import TranscribeAudio
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class AppContext:
     ingest_kb: IngestKb | None = None
     emergency_stop: EmergencyStop | None = None
     artifacts: ArtifactStore | None = None
+    transcribe: TranscribeAudio | None = None
     max_upload_bytes: int = 500 * 1024 * 1024
 
 
@@ -248,11 +250,24 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                 status_code=413,
             )
         body = await request.body()
-        # Whisper transcription is deferred; the clip is stored and marked pending.
+        # Transcribe with the bundled Whisper model when one is wired ([decisions.md 2026-07-23]);
+        # the blocking CPU work runs off the event loop. A failure (or no transcriber) never fails
+        # the upload — the clip is still stored, marked pending, so nothing is lost.
+        transcript: str | None = None
+        error: str | None = None
+        if context.transcribe is not None:
+            try:
+                transcript = await asyncio.to_thread(context.transcribe, body, content_type)
+            except Exception as exc:
+                logger.exception(
+                    "audio transcription failed: session=%s content_type=%s size=%d",
+                    session_id, content_type, len(body),
+                )
+                error = str(exc)
+        note = transcript if transcript else "transcription pending"
         try:
             artifact = _store_upload(
-                context, session_id, body, ArtifactKind.AUDIO, content_type,
-                note="transcription pending",
+                context, session_id, body, ArtifactKind.AUDIO, content_type, note=note,
             )
         except Exception:
             logger.exception(
@@ -262,6 +277,22 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
             return JSONResponse(
                 {"error": "the audio clip could not be stored on the server"},
                 status_code=500,
+            )
+        # A successful transcript reaches the session as a user message so the agent answers it,
+        # taking the same path the text composer uses ([web.md §7]).
+        if transcript:
+            message_content = [{"type": "text", "text": transcript}]
+            if context.on_message is not None:
+                await context.on_message(session_id, message_content)
+            else:
+                store.add_message(session_id, MessageRole.USER, message_content)
+            return JSONResponse(
+                {"artifact_id": artifact.id, "size": len(body), "transcription": transcript}
+            )
+        if error is not None:
+            return JSONResponse(
+                {"artifact_id": artifact.id, "size": len(body),
+                 "transcription": "failed", "error": error}
             )
         return JSONResponse(
             {"artifact_id": artifact.id, "size": len(body), "transcription": "pending"}

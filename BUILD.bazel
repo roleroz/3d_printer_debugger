@@ -24,10 +24,27 @@ pkg_tar(
     strip_prefix = ".",
 )
 
+# The bundled faster-whisper `base` model, placed at /app/whisper-base in the image so the
+# Transcriber loads it offline (main.py's PD_WHISPER_MODEL_DIR default). Pulled only when the
+# image is built — no test target depends on it, so `bazel test //...` never fetches it.
+pkg_tar(
+    name = "whisper_model_layer",
+    files = {
+        "@whisper_base_config//file": "whisper-base/config.json",
+        "@whisper_base_model_bin//file": "whisper-base/model.bin",
+        "@whisper_base_tokenizer//file": "whisper-base/tokenizer.json",
+        "@whisper_base_vocabulary//file": "whisper-base/vocabulary.txt",
+    },
+    package_dir = "/app",
+)
+
 oci_image(
     name = "image",
     base = "@debian_base",
-    tars = [":app_layer"],
+    tars = [
+        ":app_layer",
+        ":whisper_model_layer",
+    ],
     entrypoint = [
         "/app/printer_debugger/main",
         "--data-dir",
