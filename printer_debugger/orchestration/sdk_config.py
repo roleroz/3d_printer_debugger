@@ -84,7 +84,7 @@ def build_options(
         mcp_servers=mcp_servers,
         model=model,
         effort=effort,
-        thinking=ThinkingConfigAdaptive(),
+        thinking=ThinkingConfigAdaptive(type="adaptive"),
         resume=resume,
         include_partial_messages=True,
         env=env or {},
