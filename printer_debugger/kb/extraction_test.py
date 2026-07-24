@@ -81,5 +81,74 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(len(self._calls), 3)
 
 
+class ParseExtractionTest(unittest.TestCase):
+    """The pure JSON parser turns model output into an extraction, defaulting safely on garbage."""
+
+    def test_valid_json_object_parsed(self) -> None:
+        """A bare JSON object with all fields parses each value straight through."""
+        result = extraction._parse_extraction(
+            '{"is_printer": true, "name": "Trident", "address": "trident", '
+            '"config_path": "/data/printer.cfg"}'
+        )
+        self.assertEqual(
+            result,
+            SectionExtraction(
+                is_printer=True,
+                name="Trident",
+                address="trident",
+                config_path="/data/printer.cfg",
+            ),
+        )
+
+    def test_json_in_code_fence_parsed(self) -> None:
+        """JSON wrapped in a markdown code fence is isolated and parsed."""
+        text = '```json\n{"is_printer": true, "name": "V2"}\n```'
+        result = extraction._parse_extraction(text)
+        self.assertEqual(result, SectionExtraction(is_printer=True, name="V2"))
+
+    def test_missing_fields_default_to_none(self) -> None:
+        """Absent name/address/config_path become None while is_printer is honoured."""
+        result = extraction._parse_extraction('{"is_printer": true}')
+        self.assertEqual(result, SectionExtraction(is_printer=True))
+
+    def test_non_printer_section_flagged_false(self) -> None:
+        """A section the model marks as not a printer yields is_printer False."""
+        result = extraction._parse_extraction('{"is_printer": false, "name": null}')
+        self.assertEqual(result, SectionExtraction(is_printer=False))
+
+    def test_non_string_field_coerced_to_none(self) -> None:
+        """A field the model returns as a non-string (e.g. a number) is dropped to None."""
+        result = extraction._parse_extraction('{"is_printer": true, "name": 42}')
+        self.assertEqual(result, SectionExtraction(is_printer=True, name=None))
+
+    def test_garbage_text_defaults_to_non_printer(self) -> None:
+        """Text with no JSON object falls back to a safe non-printer default."""
+        result = extraction._parse_extraction("sorry, I could not classify this")
+        self.assertEqual(result, SectionExtraction(is_printer=False))
+
+    def test_malformed_json_defaults_to_non_printer(self) -> None:
+        """A truncated/invalid JSON object falls back to a safe non-printer default."""
+        result = extraction._parse_extraction('{"is_printer": true, "name": ')
+        self.assertEqual(result, SectionExtraction(is_printer=False))
+
+
+class DictToExtractionTest(unittest.TestCase):
+    """The dict validator applies safe defaults regardless of the shape it is handed."""
+
+    def test_full_dict_validated(self) -> None:
+        """A complete dict (as from structured_output) maps field-for-field."""
+        result = extraction._dict_to_extraction(
+            {"is_printer": True, "name": "A", "address": "a", "config_path": "/c"}
+        )
+        self.assertEqual(
+            result,
+            SectionExtraction(is_printer=True, name="A", address="a", config_path="/c"),
+        )
+
+    def test_non_dict_defaults_to_non_printer(self) -> None:
+        """A non-dict input (e.g. None from an empty structured_output) defaults safely."""
+        self.assertEqual(extraction._dict_to_extraction(None), SectionExtraction(is_printer=False))
+
+
 if __name__ == "__main__":
     unittest.main()
