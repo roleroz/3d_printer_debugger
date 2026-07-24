@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,6 +17,7 @@ from tempfile import TemporaryDirectory
 from fastapi.testclient import TestClient
 
 from printer_debugger import composition
+from printer_debugger.logging_setup import PACKAGE_LOGGER, configure_logging
 from printer_debugger.orchestration import turn
 from printer_debugger.printer.danger import Classification
 from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
@@ -217,59 +219,123 @@ class AutoBindFromProjectTest(_StoreFixture):
         )
         return artifact, data
 
+    def _malformed_project_artifact(self, session_id: str) -> Artifact:
+        """Store an empty (unparseable) .3mf as a PROJECT artifact and return it."""
+        blob_key = f"sessions/{session_id}/project.3mf"
+        self.artifacts.put(blob_key, io.BytesIO(b""))
+        return self.store.add_artifact(
+            session_id=session_id,
+            kind=ArtifactKind.PROJECT,
+            blob_key=blob_key,
+            size_bytes=0,
+            content_type="application/octet-stream",
+        )
+
     def test_single_printer_binds_detected(self) -> None:
-        """One known printer plus a .3mf upload auto-binds it with reason DETECTED."""
+        """One known printer plus a .3mf upload auto-binds it (DETECTED) and logs the decision."""
         printer_id = self._seed_printer("Some Other Printer")
         session = self.store.create_session(name="s")
         artifact, body = self._project_artifact(session.id)
-        bound = composition.auto_bind_from_project(
-            self.store, self.artifacts, artifact, body
-        )
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, body
+            )
         self.assertEqual(bound, printer_id)
         self.assertEqual(self.store.get_session(session.id).printer_id, printer_id)
         bindings = self.store.list_bindings(session.id)
         self.assertEqual(bindings[-1].reason, BindingReason.DETECTED)
+        self.assertTrue(
+            any("single known printer 'Some Other Printer'" in line for line in cm.output),
+            cm.output,
+        )
+
+    def test_single_printer_binds_even_when_identity_read_fails(self) -> None:
+        """A single printer binds (DETECTED) even when the .3mf identity cannot be read at all."""
+        printer_id = self._seed_printer("Some Other Printer")
+        session = self.store.create_session(name="s")
+        artifact = self._malformed_project_artifact(session.id)
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, b""
+            )
+        self.assertEqual(bound, printer_id)
+        self.assertEqual(self.store.get_session(session.id).printer_id, printer_id)
+        self.assertTrue(
+            any("single known printer 'Some Other Printer'" in line for line in cm.output),
+            cm.output,
+        )
+
+    def test_no_printers_skips(self) -> None:
+        """With no known printers, nothing binds and the skip decision is logged."""
+        session = self.store.create_session(name="s")
+        artifact, body = self._project_artifact(session.id)
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, body
+            )
+        self.assertIsNone(bound)
+        self.assertIsNone(self.store.get_session(session.id).printer_id)
+        self.assertTrue(
+            any("no known printers; skipping" in line for line in cm.output), cm.output
+        )
 
     def test_multiple_printers_one_match_binds_match(self) -> None:
-        """With several printers, only the name-matching one binds; the others are left."""
+        """With several printers, only the name-matching one binds; the match is logged."""
         match_id = self._seed_printer("Voron v2")
         other_id = self._seed_printer("Prusa MK4")
         session = self.store.create_session(name="s")
         artifact, body = self._project_artifact(session.id)
-        bound = composition.auto_bind_from_project(
-            self.store, self.artifacts, artifact, body
-        )
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, body
+            )
         self.assertEqual(bound, match_id)
         self.assertEqual(self.store.get_session(session.id).printer_id, match_id)
         self.assertNotEqual(bound, other_id)
+        self.assertTrue(any("project identity = " in line for line in cm.output), cm.output)
+        self.assertTrue(
+            any("matched 'Voron v2'; bound (DETECTED)" in line for line in cm.output),
+            cm.output,
+        )
 
     def test_multiple_printers_no_match_leaves_unbound(self) -> None:
-        """With several printers and none matching the identity, nothing binds."""
+        """With several printers and no match, nothing binds; identity and names are logged."""
         self._seed_printer("Prusa MK4")
         self._seed_printer("Bambu X1C")
         session = self.store.create_session(name="s")
         artifact, body = self._project_artifact(session.id)
-        bound = composition.auto_bind_from_project(
-            self.store, self.artifacts, artifact, body
-        )
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, body
+            )
         self.assertIsNone(bound)
         self.assertIsNone(self.store.get_session(session.id).printer_id)
+        no_match = [line for line in cm.output if "no unique match" in line]
+        self.assertTrue(no_match, cm.output)
+        self.assertIn("Prusa MK4", no_match[0])
+        self.assertIn("Bambu X1C", no_match[0])
+        self.assertIn("left for the manual picker", no_match[0])
 
     def test_existing_binding_not_overwritten(self) -> None:
-        """A session already bound to a printer is left untouched by auto-detection."""
+        """A session already bound to a printer is left untouched, and the skip is logged."""
         chosen_id = self._seed_printer("Voron v2")
         session = self.store.create_session(name="s")
         self.store.bind_printer(session.id, chosen_id, BindingReason.CHOSEN)
         artifact, body = self._project_artifact(session.id)
-        bound = composition.auto_bind_from_project(
-            self.store, self.artifacts, artifact, body
-        )
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, body
+            )
         self.assertIsNone(bound)
         self.assertEqual(self.store.get_session(session.id).printer_id, chosen_id)
         self.assertEqual(len(self.store.list_bindings(session.id)), 1)
+        self.assertTrue(
+            any("already bound" in line and "skipping" in line for line in cm.output),
+            cm.output,
+        )
 
     def test_non_project_artifact_returns_none(self) -> None:
-        """A non-PROJECT artifact (e.g. a photo) yields no binding and returns None."""
+        """A non-PROJECT artifact (e.g. a photo) binds nothing and emits no auto-bind decision."""
         self._seed_printer("Voron v2")
         session = self.store.create_session(name="s")
         blob_key = f"sessions/{session.id}/photo.jpg"
@@ -281,30 +347,28 @@ class AutoBindFromProjectTest(_StoreFixture):
             size_bytes=5,
             content_type="image/jpeg",
         )
-        bound = composition.auto_bind_from_project(
-            self.store, self.artifacts, artifact, b"\xff\xd8jpeg"
-        )
+        with self.assertNoLogs("printer_debugger.composition", level="INFO"):
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, b"\xff\xd8jpeg"
+            )
         self.assertIsNone(bound)
         self.assertIsNone(self.store.get_session(session.id).printer_id)
 
     def test_malformed_body_does_not_raise(self) -> None:
-        """A malformed/empty .3mf body is swallowed: no exception, no binding, returns None."""
+        """With several printers, a malformed .3mf body is swallowed: no bind, identity logged."""
         self._seed_printer("Voron v2")
+        self._seed_printer("Prusa MK4")
         session = self.store.create_session(name="s")
-        blob_key = f"sessions/{session.id}/project.3mf"
-        self.artifacts.put(blob_key, io.BytesIO(b""))
-        artifact = self.store.add_artifact(
-            session_id=session.id,
-            kind=ArtifactKind.PROJECT,
-            blob_key=blob_key,
-            size_bytes=0,
-            content_type="application/octet-stream",
-        )
-        bound = composition.auto_bind_from_project(
-            self.store, self.artifacts, artifact, b""
-        )
+        artifact = self._malformed_project_artifact(session.id)
+        with self.assertLogs("printer_debugger.composition", level="INFO") as cm:
+            bound = composition.auto_bind_from_project(
+                self.store, self.artifacts, artifact, b""
+            )
         self.assertIsNone(bound)
         self.assertIsNone(self.store.get_session(session.id).printer_id)
+        self.assertTrue(
+            any("could not read project identity" in line for line in cm.output), cm.output
+        )
 
 
 class RenderSinkTest(_StoreFixture):
@@ -469,6 +533,57 @@ class SubmissionLocusTest(_StoreFixture):
         outcome = submit("G28", Classification(flags=(), refused=False))
         self.assertFalse(outcome["executed"])
         self.assertIn("unreachable", outcome["reason"])
+
+
+class ConfigureLoggingTest(unittest.TestCase):
+    """configure_logging attaches a stdout handler to the package logger at the chosen level."""
+
+    def setUp(self) -> None:
+        """Snapshot and restore the package logger so the test never leaks handler state."""
+        logger = logging.getLogger(PACKAGE_LOGGER)
+        self._saved_handlers = list(logger.handlers)
+        self._saved_level = logger.level
+        self._saved_propagate = logger.propagate
+
+    def tearDown(self) -> None:
+        """Restore the package logger's handlers, level, and propagation."""
+        logger = logging.getLogger(PACKAGE_LOGGER)
+        logger.handlers = self._saved_handlers
+        logger.setLevel(self._saved_level)
+        logger.propagate = self._saved_propagate
+
+    def test_attaches_stdout_stream_handler_at_level(self) -> None:
+        """The package logger ends up with a stdout StreamHandler at the requested level."""
+        import sys
+
+        configure_logging("WARNING")
+        logger = logging.getLogger(PACKAGE_LOGGER)
+        self.assertEqual(logger.level, logging.WARNING)
+        self.assertFalse(logger.propagate)
+        stream_handlers = [
+            h for h in logger.handlers if isinstance(h, logging.StreamHandler)
+        ]
+        self.assertTrue(stream_handlers)
+        self.assertTrue(any(h.stream is sys.stdout for h in stream_handlers))
+        self.assertEqual(stream_handlers[-1].level, logging.WARNING)
+
+    def test_default_level_is_info_and_emits(self) -> None:
+        """An unknown level falls back to INFO and a subsequent logger.info is emitted."""
+        configure_logging("not-a-level")
+        logger = logging.getLogger(PACKAGE_LOGGER)
+        self.assertEqual(logger.level, logging.INFO)
+        with self.assertLogs(PACKAGE_LOGGER, level="INFO") as cm:
+            logging.getLogger("printer_debugger.composition").info("hello-console")
+        self.assertTrue(any("hello-console" in line for line in cm.output))
+
+    def test_idempotent_no_duplicate_handlers(self) -> None:
+        """Repeated configuration replaces our handler rather than stacking duplicates."""
+        configure_logging("INFO")
+        first = len(logging.getLogger(PACKAGE_LOGGER).handlers)
+        configure_logging("DEBUG")
+        second = len(logging.getLogger(PACKAGE_LOGGER).handlers)
+        self.assertEqual(first, second)
+        self.assertEqual(logging.getLogger(PACKAGE_LOGGER).level, logging.DEBUG)
 
 
 if __name__ == "__main__":

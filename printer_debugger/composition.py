@@ -115,25 +115,69 @@ def auto_bind_from_project(
 
     Runs on a ``.3mf`` upload and, conservatively, binds the session to a matching known printer
     with reason ``DETECTED``. An existing binding (user-chosen or previously detected) is never
-    overwritten, and an ambiguous match is left for the manual picker. Any failure is logged and
+    overwritten, and an ambiguous match is left for the manual picker. Every decision is logged at
+    INFO so the outcome is observable on the console. The printer set is checked first: a single
+    known printer binds without needing the project identity, so an identity-read failure can no
+    longer silently kill the reliable single-printer case. Any unexpected failure is logged and
     swallowed — detection must never break the upload. Returns the bound printer id, or None.
     """
     if artifact.kind is not ArtifactKind.PROJECT:
         return None
     try:
         session = store.get_session(artifact.session_id)
-        if session is None or session.printer_id is not None:
+        if session is None:
+            return None
+        if session.printer_id is not None:
+            _LOG.info(
+                "auto-bind: session %s already bound to %s; skipping",
+                artifact.session_id,
+                session.printer_id,
+            )
             return None  # never auto-rebind over an existing/user binding.
-        identity = _project_identity_string(body)
+
+        printers = store.list_printers()
+        if len(printers) == 0:
+            _LOG.info("auto-bind: no known printers; skipping")
+            return None
+        if len(printers) == 1:
+            only = printers[0]
+            store.bind_printer(artifact.session_id, only.id, BindingReason.DETECTED)
+            _LOG.info(
+                "auto-bind: single known printer '%s'; bound (DETECTED)", only.name
+            )
+            return only.id
+
+        # Several printers: the project identity is needed to judge candidates. Reading it is
+        # guarded — a malformed .3mf means the identity cannot be read, not an unexpected failure.
+        try:
+            identity = _project_identity_string(body)
+        except Exception:
+            identity = None
         if not identity:
+            _LOG.info(
+                "auto-bind: could not read project identity from upload; "
+                "left for the manual picker"
+            )
             return None
-        printer_id = _match_printer(store.list_printers(), identity)
+        _LOG.info("auto-bind: project identity = '%s'", identity)
+        names = [printer.name for printer in printers]
+        printer_id = _match_printer(printers, identity)
         if printer_id is None:
+            _LOG.info(
+                "auto-bind: no unique match among %s for identity '%s'; "
+                "left for the manual picker",
+                names,
+                identity,
+            )
             return None
+        matched_name = next(
+            (printer.name for printer in printers if printer.id == printer_id), printer_id
+        )
         store.bind_printer(artifact.session_id, printer_id, BindingReason.DETECTED)
+        _LOG.info("auto-bind: matched '%s'; bound (DETECTED)", matched_name)
         return printer_id
     except Exception:  # a detection failure must never break the upload.
-        _LOG.exception("auto_bind_from_project failed for session %s", artifact.session_id)
+        _LOG.exception("auto-bind failed")
         return None
 
 

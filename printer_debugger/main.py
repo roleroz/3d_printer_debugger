@@ -16,6 +16,7 @@ import os
 
 from printer_debugger import composition
 from printer_debugger.kb.ingester import KbIngester
+from printer_debugger.logging_setup import configure_logging
 from printer_debugger.store.artifact_store import ArtifactStore, LocalFilesystemArtifactStore
 from printer_debugger.store.db import Database
 from printer_debugger.store.models import Artifact
@@ -113,9 +114,14 @@ def main() -> int:
     context, _ = build(args.data_dir)
     app = create_app(context)
     if args.check:
-        # --check must not generate a cert or serve; it only proves the app builds.
+        # --check must not generate a cert or serve; it only proves the app builds. Logging
+        # configuration is a side effect, so it stays out of this path.
         print("printer_debugger: build check OK")
         return 0
+
+    # Configure application logging before serving so our printer_debugger.* records (auto-bind
+    # decisions, upload handling) reach the console; uvicorn only configures its own loggers.
+    configure_logging(os.environ.get("PD_LOG_LEVEL", "INFO"))
 
     # Serve HTTPS by default so browsers grant a secure context for mic recording; the cert
     # persists under the data dir so it survives restarts ([decisions.md 2026-07-23]).

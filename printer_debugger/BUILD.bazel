@@ -27,6 +27,17 @@ py_library(
     ],
 )
 
+# Application logging configuration: attaches a stdout StreamHandler to the printer_debugger
+# package logger so our INFO records reach the container console (uvicorn only configures its own
+# loggers). Stdlib-only, so it's a tiny standalone library both :main and the tests depend on.
+py_library(
+    name = "logging_setup",
+    srcs = ["logging_setup.py"],
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = [":init"],
+)
+
 py_binary(
     name = "main",
     srcs = ["main.py"],
@@ -36,6 +47,7 @@ py_binary(
     deps = [
         ":composition",
         ":init",
+        ":logging_setup",
         "//printer_debugger/kb",
         "//printer_debugger/store",
         "//printer_debugger/web",
@@ -53,6 +65,7 @@ py_test(
     data = ["//printer_debugger/indexing:testdata/project.3mf"],
     deps = [
         ":composition",
+        ":logging_setup",
         "@pypi//httpx",
     ],
 )
