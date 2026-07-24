@@ -86,6 +86,7 @@ class SessionViewPageTest(UiTestBase):
         self.assertIn('capture="environment"', body)  # Camera opens directly (web.md §4.2).
         self.assertIn("the corners lift", body)
         self.assertIn('id="estop"', body)  # Estop present while a printer is connected.
+        self.assertIn('id="rename-btn"', body)  # Rename affordance next to the title.
 
     def test_estop_absent_without_printer(self) -> None:
         """A session with no printer bound renders no emergency-stop control."""

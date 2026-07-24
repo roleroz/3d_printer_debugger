@@ -226,6 +226,14 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
             media_type="text/event-stream",
         )
 
+    @app.post("/sessions/{session_id}/rename")
+    async def rename_session(session_id: str, body: dict) -> Response:
+        name = (body.get("name") or "").strip()
+        if not name:
+            return JSONResponse({"error": "name must not be empty"}, status_code=400)
+        store.rename_session(session_id, name)
+        return JSONResponse({"ok": True, "name": name})
+
     @app.post("/sessions/{session_id}/close")
     async def close_session(session_id: str) -> dict:
         store.close_session(session_id)

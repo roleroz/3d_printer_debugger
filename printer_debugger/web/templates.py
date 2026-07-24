@@ -218,6 +218,8 @@ def render_session_view(
         '<header class="top">'
         f'<a class="back" href="/">&larr;</a>'
         f'<h1 class="session-title">{escape(session.name)}</h1>'
+        '<button type="button" id="rename-btn" class="rename" '
+        'title="Rename session">Rename</button>'
         f"{_mode_badge(auth)}"
         f"{_emergency_stop(printer)}"
         "</header>"

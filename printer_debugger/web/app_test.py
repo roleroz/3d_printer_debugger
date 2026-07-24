@@ -58,6 +58,23 @@ class LocalModeTest(AppTestBase):
         self.assertEqual(view["messages"][0]["role"], "user")
         self.assertEqual(self.client.post(f"/sessions/{created['id']}/close").json(), {"ok": True})
 
+    def test_rename_session(self) -> None:
+        """Renaming a session with a non-empty name updates the stored name."""
+        created = self.client.post("/sessions", json={"name": "Old"}).json()
+        response = self.client.post(f"/sessions/{created['id']}/rename", json={"name": "New name"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "New name")
+        view = self.client.get(f"/api/sessions/{created['id']}").json()
+        self.assertEqual(view["name"], "New name")
+
+    def test_rename_rejects_blank_name(self) -> None:
+        """A whitespace-only rename is rejected with 400 and leaves the name unchanged."""
+        created = self.client.post("/sessions", json={"name": "Keep"}).json()
+        response = self.client.post(f"/sessions/{created['id']}/rename", json={"name": "   "})
+        self.assertEqual(response.status_code, 400)
+        view = self.client.get(f"/api/sessions/{created['id']}").json()
+        self.assertEqual(view["name"], "Keep")
+
     def test_upload_size_precheck(self) -> None:
         """An oversized upload is rejected by the declared Content-Length before reading."""
         response = self.client.post(

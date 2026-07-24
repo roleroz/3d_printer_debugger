@@ -15,6 +15,7 @@
     if (view) {
       const sessionId = view.dataset.sessionId;
       wireComposer(sessionId);
+      wireRename(sessionId);
       wireCamera(sessionId);
       wireFileAttach(sessionId);
       wireMic(sessionId);
@@ -61,6 +62,66 @@
         body: JSON.stringify({ content: content }),
       });
     });
+  }
+
+  // --- Rename: inline-edit the session title, saving on Enter/blur ----------------------------
+  function wireRename(sessionId) {
+    const button = document.getElementById("rename-btn");
+    const title = document.querySelector(".session-title");
+    if (!button || !title) return;
+    button.addEventListener("click", () => startRename(sessionId, title));
+  }
+
+  function startRename(sessionId, title) {
+    if (title.querySelector("input")) return; // Already editing.
+    const current = title.textContent;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "rename-input";
+    input.value = current;
+    title.textContent = "";
+    title.appendChild(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const next = input.value.trim();
+      if (!save || !next || next === current) {
+        title.textContent = current; // Cancel or no change: restore the original.
+        return;
+      }
+      try {
+        const res = await fetch("/sessions/" + encodeURIComponent(sessionId) + "/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: next }),
+        });
+        if (res.ok) {
+          title.textContent = next;
+          document.title = next + " — 3D Printer Debugger";
+        } else {
+          title.textContent = current;
+          appendMessage("system", "Rename failed (" + res.status + ").");
+        }
+      } catch (err) {
+        title.textContent = current;
+        appendMessage("system", "Rename failed: " + err);
+      }
+    };
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
   }
 
   // --- Camera capture: file input with capture=environment, preview + upload -----------------
