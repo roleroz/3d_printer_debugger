@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
 from printer_debugger.store.db import Database
-from printer_debugger.store.models import ArtifactKind, MessageRole, PrinterStatus
+from printer_debugger.store.models import ArtifactKind, Message, MessageRole, PrinterStatus
 from printer_debugger.store.structured_store import StructuredStore
 from printer_debugger.web import templates
 from printer_debugger.web.app import AppContext, create_app
@@ -170,6 +170,38 @@ class StaticAssetTest(UiTestBase):
         self.assertIn("2048", js)  # MAX_EDGE bound on the longest edge.
         self.assertIn("uploadFailureText", js)
         self.assertIn('appendMessage("system"', js)
+
+    def test_app_js_posts_image_message_on_photo_upload(self) -> None:
+        """app.js posts an image reference message after a photo upload and renders it in-thread."""
+        js = self.client.get("/static/app.js").text
+        self.assertIn("sendImageMessage", js)
+        self.assertIn("appendImageMessage", js)
+        self.assertIn('type: "image"', js)
+        self.assertIn("artifact_id", js)
+
+
+class MessageRenderTest(unittest.TestCase):
+    """The message renderer turns an image reference block into an artifact-backed <img>."""
+
+    def test_image_block_renders_img_pointing_at_artifact(self) -> None:
+        """A user message with an image reference block renders <img src="/artifacts/<id>">."""
+        message = Message(
+            id="m1", session_id="s1", seq=1, role=MessageRole.USER,
+            content=[{"type": "image", "artifact_id": "art_9", "media_type": "image/jpeg"}],
+            created_at="2026-07-23T00:00:00Z",
+        )
+        html = templates.render_message(message)
+        self.assertIn('<img class="block-image" src="/artifacts/art_9"', html)
+
+    def test_text_block_still_renders_as_paragraph(self) -> None:
+        """A text block still renders as an escaped paragraph, unaffected by the image case."""
+        message = Message(
+            id="m2", session_id="s1", seq=2, role=MessageRole.USER,
+            content=[{"type": "text", "text": "why <warp>?"}],
+            created_at="2026-07-23T00:00:00Z",
+        )
+        html = templates.render_message(message)
+        self.assertIn("why &lt;warp&gt;?", html)
 
 
 class ArtifactServingTest(UiTestBase):

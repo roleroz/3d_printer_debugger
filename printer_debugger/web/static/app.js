@@ -197,7 +197,11 @@
       if (!file) return;
       previewImage(file);
       const upload = await prepareImageForUpload(file);
-      uploadWithProgress(sessionId, upload, "photo");
+      // On a successful upload the photo enters the conversation as a user message and fires a
+      // turn — the agent reacts and its reply streams back over SSE (web.md §7).
+      uploadWithProgress(sessionId, upload, "photo", (artifactId) =>
+        sendImageMessage(sessionId, artifactId, upload.type || "image/jpeg")
+      );
       input.value = "";
     });
   }
@@ -209,12 +213,27 @@
       const file = input.files && input.files[0];
       if (!file) return;
       // Only images are re-encoded; .gcode/.3mf files upload byte-for-byte.
-      const upload =
-        file.type && file.type.startsWith("image/")
-          ? await prepareImageForUpload(file)
-          : file;
-      uploadWithProgress(sessionId, upload, "file");
+      const isImage = file.type && file.type.startsWith("image/");
+      const upload = isImage ? await prepareImageForUpload(file) : file;
+      // Only an image fires a turn; a .gcode/.3mf upload is stored/indexed with no message.
+      const onUploaded = isImage
+        ? (artifactId) => sendImageMessage(sessionId, artifactId, upload.type || "image/jpeg")
+        : null;
+      uploadWithProgress(sessionId, upload, "file", onUploaded);
       input.value = "";
+    });
+  }
+
+  // Post the uploaded photo as a lean image reference message, rendering it optimistically in the
+  // conversation thread first so it appears without a refresh. The reference points at the stored
+  // artifact; the agent's streamed reply arrives over the existing SSE path.
+  function sendImageMessage(sessionId, artifactId, mediaType) {
+    appendImageMessage(artifactId);
+    const content = [{ type: "image", artifact_id: artifactId, media_type: mediaType }];
+    fetch("/sessions/" + encodeURIComponent(sessionId) + "/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content }),
     });
   }
 
@@ -313,7 +332,7 @@
   }
 
   // --- Upload progress: XHR so large .3mf/.gcode uploads show a bar (web.md §6) ---------------
-  function uploadWithProgress(sessionId, file, kind) {
+  function uploadWithProgress(sessionId, file, kind, onUploaded) {
     const wrap = document.getElementById("upload-progress");
     const bar = document.getElementById("upload-bar");
     const label = document.getElementById("upload-label");
@@ -340,6 +359,13 @@
       } else {
         if (label) label.textContent = "Uploaded " + (file.name || kind) + ".";
         if (bar) bar.value = 100;
+        if (onUploaded) {
+          let artifactId = "";
+          try {
+            artifactId = (JSON.parse(xhr.responseText) || {}).artifact_id || "";
+          } catch (e) {}
+          if (artifactId) onUploaded(artifactId);
+        }
       }
       hideLater(wrap);
     });
@@ -629,6 +655,27 @@
     p.className = "block-text";
     p.textContent = text;
     body.appendChild(p);
+    el.appendChild(roleSpan);
+    el.appendChild(body);
+    appendNode(el);
+  }
+
+  // Render an uploaded photo as a user message in the conversation thread, mirroring the
+  // server-rendered image block (.message.role-user > .message-body > img.block-image).
+  function appendImageMessage(artifactId) {
+    const el = document.createElement("div");
+    el.className = "message role-user";
+    el.dataset.role = "user";
+    const roleSpan = document.createElement("span");
+    roleSpan.className = "message-role";
+    roleSpan.textContent = "user";
+    const body = document.createElement("div");
+    body.className = "message-body";
+    const img = document.createElement("img");
+    img.className = "block-image";
+    img.src = "/artifacts/" + encodeURIComponent(artifactId);
+    img.alt = "attached image";
+    body.appendChild(img);
     el.appendChild(roleSpan);
     el.appendChild(body);
     appendNode(el);

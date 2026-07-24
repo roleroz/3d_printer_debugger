@@ -8,6 +8,7 @@ decision logic here is hermetically tested; the streaming glue is exercised by a
 
 from __future__ import annotations
 
+import base64
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from . import sdk_config
@@ -20,6 +21,41 @@ Approve = Callable[[str, tuple[str, ...]], Awaitable[bool]]
 # Per-session builders the composition root supplies.
 BuildServers = Callable[[str], "dict[str, Any]"]
 BuildPrompt = Callable[[str], str]
+# read_artifact(artifact_id) -> (raw bytes, content type). Supplied by the composition root so the
+# lean image reference blocks in a persisted message can be inlined for the model at this boundary.
+ArtifactReader = Callable[[str], "tuple[bytes, str]"]
+
+
+def inline_image_blocks(content: list[Any], read_artifact: ArtifactReader) -> list[Any]:
+    """Expand each image reference block to a base64 image block; pass every other block through.
+
+    A persisted user message keeps images lean as a reference block
+    ``{"type": "image", "artifact_id": id, "media_type": ct}`` — a name, not bytes. The model needs
+    the real image, so at the SDK boundary each reference is read and re-emitted as the Anthropic
+    image block ``{"type": "image", "source": {"type": "base64", "media_type": ct, "data": b64}}``.
+    The block's declared ``media_type`` wins; the reader's content type is the fallback. Text blocks
+    and any already-inlined image blocks (those carrying a ``source`` rather than an
+    ``artifact_id``) are returned unchanged.
+    """
+    inlined: list[Any] = []
+    for block in content:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "image"
+            and block.get("artifact_id")
+        ):
+            data, content_type = read_artifact(str(block["artifact_id"]))
+            media_type = str(block.get("media_type") or content_type)
+            encoded = base64.b64encode(data).decode("ascii")
+            inlined.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": encoded},
+                }
+            )
+        else:
+            inlined.append(block)
+    return inlined
 
 
 def classify_permission(tool_name: str) -> str:
@@ -54,6 +90,7 @@ class ClaudeAgentClient:
         build_servers: BuildServers,
         build_prompt: BuildPrompt,
         resume_lookup: Callable[[str], str | None] = lambda _: None,
+        read_artifact: ArtifactReader | None = None,
         model: str | None = None,
         effort: str | None = None,
         env: dict[str, str] | None = None,
@@ -62,6 +99,7 @@ class ClaudeAgentClient:
         self._build_servers = build_servers
         self._build_prompt = build_prompt
         self._resume_lookup = resume_lookup
+        self._read_artifact = read_artifact
         self._model = model
         self._effort = effort
         self._env = env
@@ -84,9 +122,16 @@ class ClaudeAgentClient:
         A ``can_use_tool`` callback requires the SDK's **streaming-input** mode, so the prompt is an
         async iterable yielding one user message (not a bare string). The loop ends at the turn's
         ``ResultMessage`` so ``run_turn`` returns after a single turn rather than waiting for more
-        input.
+        input. Image reference blocks are inlined to base64 here so the model receives the bytes
+        while the persisted message stays lean.
         """
         from claude_agent_sdk import query
+
+        content = (
+            inline_image_blocks(user_content, self._read_artifact)
+            if self._read_artifact is not None
+            else user_content
+        )
 
         options = sdk_config.build_options(
             system_prompt=self._build_prompt(session_id),
@@ -102,7 +147,7 @@ class ClaudeAgentClient:
             yield {
                 "type": "user",
                 "session_id": "",
-                "message": {"role": "user", "content": user_content},
+                "message": {"role": "user", "content": content},
                 "parent_tool_use_id": None,
             }
 

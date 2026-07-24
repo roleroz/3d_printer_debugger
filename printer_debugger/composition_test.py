@@ -21,6 +21,7 @@ from printer_debugger.logging_setup import PACKAGE_LOGGER, configure_logging
 from printer_debugger.orchestration import turn
 from printer_debugger.printer.danger import Classification
 from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
+from printer_debugger.store.errors import ArtifactNotFoundError
 from printer_debugger.store.db import Database
 from printer_debugger.store.models import (
     ApprovalDecision,
@@ -153,6 +154,30 @@ class UploadIndexTest(_StoreFixture):
 _PROJECT_3MF = (
     Path(__file__).resolve().parent / "indexing" / "testdata" / "project.3mf"
 )
+
+
+class ArtifactReaderTest(_StoreFixture):
+    """make_artifact_reader returns an artifact's bytes and content type, or raises when absent."""
+
+    def test_reads_stored_bytes_and_content_type(self) -> None:
+        """The reader returns the stored blob bytes and the artifact's content type for an id."""
+        session = self.store.create_session(name="s")
+        blob_key = f"sessions/{session.id}/photo.jpg"
+        self.artifacts.put(blob_key, io.BytesIO(b"\xff\xd8jpeg"))
+        artifact = self.store.add_artifact(
+            session_id=session.id, kind=ArtifactKind.PHOTO, blob_key=blob_key,
+            size_bytes=5, content_type="image/jpeg",
+        )
+        reader = composition.make_artifact_reader(self.store, self.artifacts)
+        data, content_type = reader(artifact.id)
+        self.assertEqual(data, b"\xff\xd8jpeg")
+        self.assertEqual(content_type, "image/jpeg")
+
+    def test_unknown_artifact_raises(self) -> None:
+        """Reading an artifact id with no row raises ArtifactNotFoundError rather than returning."""
+        reader = composition.make_artifact_reader(self.store, self.artifacts)
+        with self.assertRaises(ArtifactNotFoundError):
+            reader("art_missing")
 
 
 class LoadProjectToolsTest(_StoreFixture):

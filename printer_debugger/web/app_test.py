@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from printer_debugger.kb.models import IngestOutcome
 from printer_debugger.store.db import Database
-from printer_debugger.store.models import BindingReason, PrinterStatus
+from printer_debugger.store.models import BindingReason, MessageRole, PrinterStatus
 from printer_debugger.store.structured_store import StructuredStore
 from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode
@@ -240,6 +240,32 @@ class UploadFailureReportingTest(AppTestBase):
         self.assertIn("upload: responding 200 artifact=", joined)
         # The TestClient always sets Content-Length to the true body size, so the length-mismatch
         # warning cannot be triggered through it; that path is left to real proxy/network runs.
+
+
+class ImageMessageTest(AppTestBase):
+    """An uploaded photo posted as an image-only message fires a turn and persists the reference."""
+
+    def test_image_only_content_runs_on_message_and_persists_reference(self) -> None:
+        """A /messages POST with only an image block runs on_message and stores the ref block."""
+        seen: list[tuple[str, list[object]]] = []
+
+        async def on_message(session_id: str, content: list[object]) -> None:
+            # Mirror the real turn loop: the handler persists the user message, then runs the turn.
+            seen.append((session_id, content))
+            self.store.add_message(session_id, MessageRole.USER, content)
+
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL), on_message=on_message,
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        block = {"type": "image", "artifact_id": "art_1", "media_type": "image/jpeg"}
+        response = client.post(f"/sessions/{session.id}/messages", json={"content": [block]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, [(session.id, [block])])
+        view = client.get(f"/api/sessions/{session.id}").json()
+        self.assertEqual(view["messages"][0]["role"], "user")
+        self.assertEqual(view["messages"][0]["content"], [block])
 
 
 class AudioTranscriptionTest(AppTestBase):

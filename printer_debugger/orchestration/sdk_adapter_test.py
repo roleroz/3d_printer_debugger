@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import unittest
 
 from printer_debugger.orchestration import sdk_config, sdk_translate
-from printer_debugger.orchestration.sdk_client import classify_permission, permission_decision
+from printer_debugger.orchestration.sdk_client import (
+    classify_permission,
+    inline_image_blocks,
+    permission_decision,
+)
 from printer_debugger.orchestration.turn import (
     AssistantMessageEvent,
     TextEvent,
@@ -142,6 +147,51 @@ class TranslateTest(unittest.TestCase):
         )
         self.assertIsInstance(usage[0], UsageEvent)
         self.assertEqual(usage[0].usage.input_tokens, 120)
+
+
+class InlineImageBlocksTest(unittest.TestCase):
+    """Image reference blocks are inlined to base64 for the model; other blocks pass through."""
+
+    def test_image_reference_becomes_base64_block(self) -> None:
+        """An image reference block is read via the reader and re-emitted as a base64 block."""
+        reads: list[str] = []
+
+        def reader(artifact_id: str) -> tuple[bytes, str]:
+            reads.append(artifact_id)
+            return b"\x89PNG-bytes", "image/png"
+
+        content = [{"type": "image", "artifact_id": "art_1", "media_type": "image/png"}]
+        result = inline_image_blocks(content, reader)
+        expected_data = base64.b64encode(b"\x89PNG-bytes").decode("ascii")
+        self.assertEqual(
+            result,
+            [{"type": "image",
+              "source": {"type": "base64", "media_type": "image/png", "data": expected_data}}],
+        )
+        self.assertEqual(reads, ["art_1"])
+
+    def test_text_and_inlined_blocks_pass_through_unchanged(self) -> None:
+        """A text block and an already-inlined image block are returned without a reader call."""
+
+        def reader(artifact_id: str) -> tuple[bytes, str]:
+            raise AssertionError("the reader must not be called for non-reference blocks")
+
+        already_inlined = {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": "AAAA"},
+        }
+        content = [{"type": "text", "text": "why is this warping?"}, already_inlined]
+        self.assertEqual(inline_image_blocks(content, reader), content)
+
+    def test_media_type_falls_back_to_reader_content_type(self) -> None:
+        """A reference block with no media_type uses the content type the reader returns."""
+
+        def reader(artifact_id: str) -> tuple[bytes, str]:
+            return b"jpegdata", "image/jpeg"
+
+        content = [{"type": "image", "artifact_id": "art_2"}]
+        result = inline_image_blocks(content, reader)
+        self.assertEqual(result[0]["source"]["media_type"], "image/jpeg")
 
 
 if __name__ == "__main__":

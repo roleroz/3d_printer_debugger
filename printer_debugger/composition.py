@@ -33,6 +33,7 @@ from .orchestration.sdk_client import ClaudeAgentClient
 from .orchestration.turn import AgentEvent, TextEvent, ToolStartEvent, TurnLoop
 from .procedures import catalog as procedures_catalog
 from .store.artifact_store import ArtifactStore, artifact_key, index_key
+from .store.errors import ArtifactNotFoundError
 from .store.models import (
     ApprovalDecision,
     Artifact,
@@ -491,6 +492,27 @@ def _forward_event(hub: SseHub, session_id: str, event: AgentEvent) -> None:
         hub.publish(session_id, "tool", {"server": event.server, "tool": event.tool})
 
 
+def make_artifact_reader(
+    store: StructuredStore, artifacts: ArtifactStore
+) -> Callable[[str], tuple[bytes, str]]:
+    """Build the reader the SDK client uses to inline an image artifact's bytes for the model.
+
+    Given an artifact id, it returns the raw bytes and the stored content type, so an image
+    reference block in a persisted user message can be expanded to a base64 image block at the SDK
+    boundary. A missing artifact row raises ``ArtifactNotFoundError`` rather than reading nothing.
+    """
+
+    def read(artifact_id: str) -> tuple[bytes, str]:
+        artifact = store.get_artifact(artifact_id)
+        if artifact is None:
+            raise ArtifactNotFoundError(artifact_id)
+        with artifacts.open(artifact.blob_key) as blob:
+            data = blob.read()
+        return data, artifact.content_type
+
+    return read
+
+
 def make_client_factory(  # pragma: no cover - constructs the live SDK client
     store: StructuredStore,
     artifacts: ArtifactStore,
@@ -509,6 +531,7 @@ def make_client_factory(  # pragma: no cover - constructs the live SDK client
             build_servers=lambda sid: build_servers(store, artifacts, sid),
             build_prompt=lambda sid: build_prompt(store, kb, catalog_text, sid),
             resume_lookup=_resume_lookup(store),
+            read_artifact=make_artifact_reader(store, artifacts),
             model=model,
             effort=effort,
             env={OAUTH_ENV: token},
