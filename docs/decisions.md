@@ -820,3 +820,18 @@ on demand / in the background is now future work ([spec.md §14](spec.md#14-futu
 G-code questions, and it keeps the tool surface honest (the index is ready when the session is).
 The background build matters at the file size limit, where the upload wait becomes noticeable; that
 is the refinement, deferred until the simple path is proven.
+
+## 2026-07-23 — Voice transcription: bundled faster-whisper base model
+
+**Decision:** Server-side voice transcription uses **faster-whisper** (CTranslate2, CPU int8), with
+the **`base`** model **bundled into the container image** (fetched hermetically via Bazel, not
+downloaded at runtime — fully offline/self-contained). Model size is env-overridable. Browser audio
+(webm/opus from MediaRecorder) is decoded with `av` (PyAV, which bundles its own ffmpeg — no system
+ffmpeg needed). Transcription runs synchronously in the audio-upload request; the transcript is
+submitted as the (editable) user message so a mis-hear is visible and correctable, per web.md §7.
+`faster-whisper` is lazy-imported so `bazel test //...` stays lean — the transcription path is
+tested behind a fake-transcriber seam, not the real model.
+
+**Why:** Bundling keeps the "one container, no external services" property and avoids a
+first-run network dependency; `base` is fast on CPU and adequate for short voice notes, with `small`
+available by env for better accuracy on technical terms.
