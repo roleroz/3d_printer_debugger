@@ -793,3 +793,30 @@ in-process.
 - Subscription auth fits the primary local-on-LAN mode (runs under `claude login`); a cloud
   deployment would provision OAuth credentials into the container or fall back to an API key, and
   automated subscription use should be checked against the plan's terms.
+
+## 2026-07-23 — Agent credentials required at startup (subscription OAuth token)
+
+**Decision:** The system authenticates to Claude with a **Claude-subscription OAuth token supplied
+at runtime via an environment variable** (Claude Code's `claude setup-token` mechanism; the exact
+variable name is confirmed against the current SDK/CLI at implementation). It is a **hard startup
+requirement**: the process crashes at startup if the token is absent — no API-key fallback and no
+graceful degradation. Tests and the `--check` build smoke test set a fake token so they run without
+real credentials (the SDK path is never actually invoked hermetically). Secrets come from the
+environment only, never the image.
+
+**Why:** The subscription (not per-token API billing) is the intended cost model, and a token env
+var is headless-friendly — identical for a local run and the container, with nothing mounted.
+Crashing at startup rather than degrading makes a misconfiguration loud and immediate, which is
+preferable to a UI that silently cannot answer.
+
+## 2026-07-23 — G-code index built synchronously on upload (for now)
+
+**Decision:** When a G-code file is uploaded, its index is built **synchronously during the upload
+request**, and the built index is stored. This supersedes, for the first end-to-end wiring, the
+background-build-with-progress design ([file_indexing.md T4.6](design/file_indexing.md)); building
+on demand / in the background is now future work ([spec.md §14](spec.md#14-future-work)).
+
+**Why:** Synchronous-on-upload is the simplest path to a working end-to-end agent that can answer
+G-code questions, and it keeps the tool surface honest (the index is ready when the session is).
+The background build matters at the file size limit, where the upload wait becomes noticeable; that
+is the refinement, deferred until the simple path is proven.
