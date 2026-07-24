@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -148,6 +149,35 @@ class DictToExtractionTest(unittest.TestCase):
     def test_non_dict_defaults_to_non_printer(self) -> None:
         """A non-dict input (e.g. None from an empty structured_output) defaults safely."""
         self.assertEqual(extraction._dict_to_extraction(None), SectionExtraction(is_printer=False))
+
+
+class BackgroundLoopTest(unittest.TestCase):
+    """The persistent background loop runs coroutines and is created once and reused (SDK-free)."""
+
+    def test_runs_coroutine_and_returns_value(self) -> None:
+        """A trivial coroutine dispatched to the background loop runs and returns its value."""
+
+        async def _double(x: int) -> int:
+            return x * 2
+
+        self.assertEqual(extraction._run_on_background_loop(_double(21)), 42)
+
+    def test_same_loop_instance_reused_across_calls(self) -> None:
+        """Repeated dispatches share one running loop instance rather than a fresh loop per call."""
+
+        async def _current_loop() -> object:
+            return asyncio.get_running_loop()
+
+        first = extraction._run_on_background_loop(_current_loop())
+        second = extraction._run_on_background_loop(_current_loop())
+        self.assertIs(first, second)
+        self.assertIs(first, extraction._get_background_loop())
+
+    def test_loop_created_once_and_kept_running(self) -> None:
+        """The singleton getter returns the same running loop on every call."""
+        loop = extraction._get_background_loop()
+        self.assertIs(loop, extraction._get_background_loop())
+        self.assertTrue(loop.is_running())
 
 
 if __name__ == "__main__":

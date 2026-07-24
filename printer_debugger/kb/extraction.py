@@ -8,15 +8,66 @@ tests supply results without a network — honest here, since it returns three s
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
+import threading
+from collections.abc import Coroutine
 from pathlib import PurePosixPath
+from typing import TypeVar
 
 from ..store.structured_store import StructuredStore
 from .models import SectionExtraction
 
 # A small fast model: extracting three values from prose is mechanical and runs on every change.
 EXTRACTION_MODEL = "claude-haiku-4-5"
+
+_T = TypeVar("_T")
+
+# A single persistent event loop drives every SDK query for the process lifetime. It is created
+# once, run with ``run_forever()`` on a daemon thread, and never torn down. A fresh
+# ``asyncio.run`` loop per section was the crash's cause: ``_query_extraction`` breaks out of the
+# ``async for`` at ``ResultMessage``, leaving the SDK's subprocess-backed async generator
+# suspended, and ``asyncio.run`` then closed that loop — so the generator and its subprocess
+# transport were finalized later against an already-closed loop (``aclose(): asynchronous
+# generator is already running``; ``Loop ... that handles pid N is closed``; leaked subprocesses).
+# One long-lived loop keeps the subprocess child-watcher valid and never tears a loop down while a
+# query's generator/transport is still finalizing. A background-thread loop can still spawn
+# subprocesses under Python 3.12's ``ThreadedChildWatcher``.
+_loop_lock = threading.Lock()
+_background_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_background_loop() -> asyncio.AbstractEventLoop:
+    """Return the process-wide background event loop, creating and starting it once (thread-safe).
+
+    Double-checked locking so the loop and its daemon thread are created exactly once even under
+    concurrent first calls; every later call returns the same already-running loop.
+    """
+    global _background_loop
+    loop = _background_loop
+    if loop is not None:
+        return loop
+    with _loop_lock:
+        if _background_loop is not None:
+            return _background_loop
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(target=loop.run_forever, name="kb-extraction-loop", daemon=True)
+        thread.start()
+        _background_loop = loop
+        return loop
+
+
+def _run_on_background_loop(coro: Coroutine[object, object, _T]) -> _T:
+    """Run ``coro`` on the shared background loop and block for its result.
+
+    Dispatches with ``asyncio.run_coroutine_threadsafe`` and blocks on the future, giving the same
+    synchronous, caller-blocking semantics whether called from the FastAPI request-loop thread or
+    a worker thread — without ever creating or tearing down a loop per call.
+    """
+    loop = _get_background_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 def section_hash(text: str) -> str:
@@ -188,15 +239,25 @@ async def _query_extraction(  # pragma: no cover - needs a model
     )
     structured: object = None
     last_text = ""
-    async for message in query(prompt=_build_prompt(section_text), options=options):
-        kind = type(message).__name__
-        if kind == "AssistantMessage":
-            for block in message.content:
-                if type(block).__name__ == "TextBlock":
-                    last_text = block.text
-        elif kind == "ResultMessage":
-            structured = getattr(message, "structured_output", None)
-            break
+    # Hold the async iterator so it can be fully closed inside this still-running loop. Breaking at
+    # ResultMessage leaves it suspended; closing it here (rather than letting GC finalize it later
+    # against a torn-down loop) is what prevents the ``aclose(): asynchronous generator is already
+    # running`` crash and the leaked ``claude`` subprocess per section.
+    agen = query(prompt=_build_prompt(section_text), options=options)
+    try:
+        async for message in agen:
+            kind = type(message).__name__
+            if kind == "AssistantMessage":
+                for block in message.content:
+                    if type(block).__name__ == "TextBlock":
+                        last_text = block.text
+            elif kind == "ResultMessage":
+                structured = getattr(message, "structured_output", None)
+                break
+    finally:
+        aclose = getattr(agen, "aclose", None)
+        if aclose is not None:
+            await aclose()
     if isinstance(structured, dict):
         return _dict_to_extraction(structured)
     return _parse_extraction(last_text)
@@ -207,13 +268,12 @@ def _extract_section(section_text: str) -> SectionExtraction:  # pragma: no cove
 
     Runs a ``claude-agent-sdk`` query authenticated with the subscription OAuth token
     (``CLAUDE_CODE_OAUTH_TOKEN``, passed via ``ClaudeAgentOptions.env`` — never an API key). The
-    SDK and its event loop are entered only here, so the module carries no SDK dependency until
-    used. Stays synchronous: it is called deep inside a running FastAPI request loop, so when a
-    loop is already running it drives the async query on a private loop in a worker thread; with
-    no loop running it uses ``asyncio.run`` directly.
+    SDK is imported only inside the async helper, so the module carries no SDK dependency until
+    used. Stays synchronous: the query is dispatched to the single persistent background loop and
+    blocks the caller until the result is ready. Because it always dispatches to that dedicated
+    loop, it works identically whether called from the FastAPI request-loop thread or a worker
+    thread — no need to detect whether a loop is already running.
     """
-    import asyncio
-    import concurrent.futures
     import os
 
     token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -222,14 +282,4 @@ def _extract_section(section_text: str) -> SectionExtraction:  # pragma: no cove
             "CLAUDE_CODE_OAUTH_TOKEN is not set; section extraction needs the subscription "
             "token (ANTHROPIC_API_KEY is deliberately not used)."
         )
-
-    def _run() -> SectionExtraction:
-        return asyncio.run(_query_extraction(section_text, token))
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return _run()  # No loop on this thread: run the coroutine directly.
-    # A loop is already running (the FastAPI request thread): run on a private loop off-thread.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(_run).result()
+    return _run_on_background_loop(_query_extraction(section_text, token))
