@@ -50,6 +50,7 @@ py_test(
     name = "composition_test",
     size = "small",
     srcs = ["composition_test.py"],
+    data = ["//printer_debugger/indexing:testdata/project.3mf"],
     deps = [
         ":composition",
         "@pypi//httpx",

@@ -54,6 +54,19 @@ class ThreeMfTest(unittest.TestCase):
         self.assertTrue(layout)
         self.assertIn("min_xy", layout[0])
 
+    def test_from_bytes_matches_path(self) -> None:
+        """Opening the same ``.3mf`` from in-memory bytes yields the same settings and objects."""
+        data = _PROJECT.read_bytes()
+        with Project.from_bytes(data) as project:
+            self.assertEqual(
+                project.printer_identity()["printer_settings_id"],
+                self.project.printer_identity()["printer_settings_id"],
+            )
+            self.assertEqual(
+                [o.name for o in project.objects()],
+                [o.name for o in self.project.objects()],
+            )
+
 
 class GeometryTest(unittest.TestCase):
     """Measurements are plausible for a real part."""

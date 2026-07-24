@@ -16,18 +16,21 @@ approved path, so a command is submitted exactly once.
 from __future__ import annotations
 
 import io
+import uuid
 from collections.abc import Mapping
 from typing import Any, Awaitable, Callable
 
 from .indexing import gcode, index_format
 from .indexing.gcode_server import GcodeTools
+from .indexing.project_server import ArtifactSink, ProjectTools
+from .indexing.threemf import Project
 from .orchestration import prompt
 from .orchestration.gate import ApprovalGate, Proposal
 from .orchestration.prompt import PromptInputs
 from .orchestration.sdk_client import ClaudeAgentClient
 from .orchestration.turn import AgentEvent, TextEvent, ToolStartEvent, TurnLoop
 from .procedures import catalog as procedures_catalog
-from .store.artifact_store import ArtifactStore, index_key
+from .store.artifact_store import ArtifactStore, artifact_key, index_key
 from .store.models import ApprovalDecision, Artifact, ArtifactKind, FileIndexKind
 from .store.structured_store import StructuredStore
 from .web.sse import SseHub
@@ -111,6 +114,53 @@ def load_gcode_tools(
             text = raw.read().decode("utf-8", errors="replace")
         return GcodeTools(index, text)
     return None
+
+
+def load_project_tools(
+    store: StructuredStore, artifacts: ArtifactStore, session_id: str
+) -> ProjectTools | None:
+    """Reconstruct ``ProjectTools`` over the session's most recent uploaded ``.3mf``, or None.
+
+    A ``.3mf`` is a ZIP and needs random access, so its blob is read whole into memory rather than
+    streamed. The tools are given a sink that persists any render into the artifact store so the UI
+    can fetch it.
+    """
+    for artifact in reversed(store.list_artifacts(session_id)):
+        if artifact.kind is not ArtifactKind.PROJECT:
+            continue
+        with artifacts.open(artifact.blob_key) as blob:
+            data = blob.read()
+        project = Project.from_bytes(data)
+        return ProjectTools(
+            project, artifact_sink=make_render_sink(store, artifacts, session_id)
+        )
+    return None
+
+
+def make_render_sink(
+    store: StructuredStore, artifacts: ArtifactStore, session_id: str
+) -> ArtifactSink:
+    """Build the sink ``ProjectTools`` calls to persist a render and get back a fetchable reference.
+
+    The PNG is stored under a session-scoped blob key, an image artifact row is recorded, and a
+    ``/artifacts/{id}`` reference is returned — the same key/row machinery an upload uses, so the
+    ``serve_artifact`` route resolves it.
+    """
+
+    def sink(data: bytes, name: str) -> str:
+        blob_key = artifact_key(session_id, uuid.uuid4().hex, ".png")
+        artifacts.put(blob_key, io.BytesIO(data))
+        artifact = store.add_artifact(
+            session_id=session_id,
+            kind=ArtifactKind.PROCEDURE_OUTPUT,
+            blob_key=blob_key,
+            size_bytes=len(data),
+            content_type="image/png",
+            note=name,
+        )
+        return f"/artifacts/{artifact.id}"
+
+    return sink
 
 
 # -- the approval gate wiring (publish → await → record; no execution) --------------------------
@@ -234,12 +284,15 @@ def build_servers(  # pragma: no cover - needs the Agent SDK
     store: StructuredStore, artifacts: ArtifactStore, session_id: str
 ) -> dict[str, Any]:
     """Construct whichever in-process MCP servers the session has data for."""
-    from .indexing.mcp import build_gcode_server, build_sdk_server
+    from .indexing.mcp import build_gcode_server, build_project_server, build_sdk_server
 
     servers: dict[str, Any] = {}
     gtools = load_gcode_tools(store, artifacts, session_id)
     if gtools is not None:
         servers["gcode"] = build_gcode_server(gtools)
+    ptools_project = load_project_tools(store, artifacts, session_id)
+    if ptools_project is not None:
+        servers["project"] = build_project_server(ptools_project)
     ptools = build_printer_tools(store, session_id)
     if ptools is not None:
         servers["printer"] = build_sdk_server("printer", ptools)

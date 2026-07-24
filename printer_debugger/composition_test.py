@@ -8,6 +8,7 @@ carries a one-line doc comment stating the behaviour it verifies.
 from __future__ import annotations
 
 import asyncio
+import io
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,7 +20,7 @@ from printer_debugger.orchestration import turn
 from printer_debugger.printer.danger import Classification
 from printer_debugger.store.artifact_store import LocalFilesystemArtifactStore
 from printer_debugger.store.db import Database
-from printer_debugger.store.models import ApprovalDecision, TokenUsage
+from printer_debugger.store.models import ApprovalDecision, ArtifactKind, TokenUsage
 from printer_debugger.store.structured_store import StructuredStore
 from printer_debugger.web.app import AppContext, create_app
 from printer_debugger.web.security import AuthConfig, AuthMode
@@ -138,6 +139,81 @@ class UploadIndexTest(_StoreFixture):
         )
         self.assertEqual(response.json()["kind"], "project")
         self.assertIsNone(self.store.get_file_index(response.json()["artifact_id"]))
+
+
+_PROJECT_3MF = (
+    Path(__file__).resolve().parent / "indexing" / "testdata" / "project.3mf"
+)
+
+
+class LoadProjectToolsTest(_StoreFixture):
+    """load_project_tools reconstructs ProjectTools over an uploaded .3mf, or returns None."""
+
+    def _store_project(self, session_id: str) -> None:
+        """Store the real .3mf fixture as a PROJECT artifact of the session."""
+        data = _PROJECT_3MF.read_bytes()
+        blob_key = f"sessions/{session_id}/project.3mf"
+        self.artifacts.put(blob_key, io.BytesIO(data))
+        self.store.add_artifact(
+            session_id=session_id,
+            kind=ArtifactKind.PROJECT,
+            blob_key=blob_key,
+            size_bytes=len(data),
+            content_type="application/octet-stream",
+        )
+
+    def test_returns_tools_answering_over_the_project(self) -> None:
+        """An uploaded .3mf yields tools whose settings and dimensions answer sensibly."""
+        session = self.store.create_session(name="s")
+        self._store_project(session.id)
+        tools = composition.load_project_tools(self.store, self.artifacts, session.id)
+        self.assertIsNotNone(tools)
+        settings = tools.get_settings()
+        self.assertIn("keys", settings)
+        self.assertTrue(settings["keys"])
+        dimensions = tools.get_object_dimensions()
+        self.assertGreater(dimensions["height"], 0)
+        self.assertGreater(dimensions["volume"], 0)
+
+    def test_no_project_returns_none(self) -> None:
+        """A session with no PROJECT artifact returns None."""
+        session = self.store.create_session(name="s")
+        self.assertIsNone(
+            composition.load_project_tools(self.store, self.artifacts, session.id)
+        )
+
+
+class RenderSinkTest(_StoreFixture):
+    """The render sink persists a PNG into the artifact store and returns a resolvable reference."""
+
+    def test_render_is_stored_and_reference_resolves(self) -> None:
+        """get_object_render stores PNG bytes and returns a /artifacts reference serve_artifact
+        resolves to those bytes."""
+        session = self.store.create_session(name="s")
+        data = _PROJECT_3MF.read_bytes()
+        blob_key = f"sessions/{session.id}/project.3mf"
+        self.artifacts.put(blob_key, io.BytesIO(data))
+        self.store.add_artifact(
+            session_id=session.id,
+            kind=ArtifactKind.PROJECT,
+            blob_key=blob_key,
+            size_bytes=len(data),
+            content_type="application/octet-stream",
+        )
+        tools = composition.load_project_tools(self.store, self.artifacts, session.id)
+        assert tools is not None
+        result = tools.get_object_render(view="iso", width=64, height=64)
+        reference = result["artifact"]
+        self.assertIsNotNone(reference)
+        self.assertTrue(reference.startswith("/artifacts/"))
+
+        artifact_id = reference.rsplit("/", 1)[-1]
+        artifact = self.store.get_artifact(artifact_id)
+        self.assertIsNotNone(artifact)
+        self.assertEqual(artifact.content_type, "image/png")
+        with self.artifacts.open(artifact.blob_key) as blob:
+            stored = blob.read()
+        self.assertTrue(stored.startswith(b"\x89PNG"))
 
 
 class OnMessageTurnTest(_StoreFixture):

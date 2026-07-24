@@ -9,6 +9,7 @@ exposes the preset names and resolved values; the modified-from-preset diff is f
 
 from __future__ import annotations
 
+import io
 import json
 import xml.etree.ElementTree as ET
 import zipfile
@@ -36,11 +37,28 @@ class Project:
     """Read access to a ``.3mf`` project's settings, metadata, thumbnails, and meshes."""
 
     def __init__(self, path: str) -> None:
+        self._buffer: io.BytesIO | None = None
         self._zip = zipfile.ZipFile(path)
         self._settings_cache: dict | None = None
 
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "Project":
+        """Open a project from in-memory ``.3mf`` bytes.
+
+        A ``.3mf`` is a ZIP and needs random access, so the bytes are wrapped in an in-memory
+        buffer rather than streamed; the buffer is retained on the instance so it outlives this
+        call and is not garbage-collected while the ZipFile reads from it.
+        """
+        project = cls.__new__(cls)
+        project._buffer = io.BytesIO(data)
+        project._zip = zipfile.ZipFile(project._buffer)
+        project._settings_cache = None
+        return project
+
     def close(self) -> None:
         self._zip.close()
+        if self._buffer is not None:
+            self._buffer.close()
 
     def __enter__(self) -> "Project":
         return self

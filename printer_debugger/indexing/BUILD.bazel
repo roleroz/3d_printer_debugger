@@ -1,5 +1,9 @@
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 
+# The real OrcaSlicer fixture, exported so cross-package tests (e.g. //printer_debugger:
+# composition_test) can depend on it as data.
+exports_files(["testdata/project.3mf"])
+
 py_library(
     name = "indexing",
     srcs = [
