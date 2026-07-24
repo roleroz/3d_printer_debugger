@@ -220,6 +220,27 @@ class UploadFailureReportingTest(AppTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("artifact_id", response.json())
 
+    def test_normal_upload_logs_diagnostic_sequence(self) -> None:
+        """A 200 upload logs enter, then body-read with the exact byte count, then responding."""
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL), max_upload_bytes=1000
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        payload = b"\x89PNGdata"
+        with self.assertLogs(self._LOGGER, level="INFO") as logs:
+            response = client.post(
+                f"/sessions/{session.id}/files", content=payload,
+                headers={"Content-Type": "image/png", "X-Filename": "p.jpg"},
+            )
+        self.assertEqual(response.status_code, 200)
+        joined = "\n".join(logs.output)
+        self.assertIn("upload: enter session=", joined)
+        self.assertIn(f"upload: body read actual={len(payload)} bytes", joined)
+        self.assertIn("upload: responding 200 artifact=", joined)
+        # The TestClient always sets Content-Length to the true body size, so the length-mismatch
+        # warning cannot be triggered through it; that path is left to real proxy/network runs.
+
 
 class AudioTranscriptionTest(AppTestBase):
     """The /audio route transcribes via the injected seam and feeds the transcript to a session."""
@@ -304,6 +325,21 @@ class AudioTranscriptionTest(AppTestBase):
         self.assertEqual(response.json()["transcription"], "pending")
         artifacts = self.client_artifacts(client, session.id)
         self.assertEqual(artifacts[0]["note"], "transcription pending")
+
+    def test_audio_upload_logs_diagnostic_sequence(self) -> None:
+        """A 200 audio upload logs enter, body-read with the byte count, then responding."""
+        context = AppContext(
+            store=self.store, auth=AuthConfig(mode=AuthMode.LOCAL), max_upload_bytes=1000
+        )
+        client = self._client(context)
+        session = self.store.create_session(name="s")
+        with self.assertLogs(self._LOGGER, level="INFO") as logs:
+            response = self._post_audio(client, session.id)
+        self.assertEqual(response.status_code, 200)
+        joined = "\n".join(logs.output)
+        self.assertIn("upload: audio enter session=", joined)
+        self.assertIn("upload: audio body read actual=9 bytes", joined)
+        self.assertIn("upload: audio responding artifact=", joined)
 
     def client_artifacts(self, client: TestClient, session_id: str) -> list[dict]:
         """Fetch the session's artifact metadata list via the JSON view."""

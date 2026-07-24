@@ -11,6 +11,7 @@ import asyncio
 import io
 import json
 import logging
+import time
 import urllib.parse
 import uuid
 from contextlib import asynccontextmanager
@@ -203,9 +204,22 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
 
     @app.post("/sessions/{session_id}/files")
     async def upload_file(session_id: str, request: Request) -> Response:
+        # Diagnostic instrumentation ([decisions.md 2026-07-23]): a remote photo upload reaches
+        # 100% on the client, then the server never responds. These INFO lines pin down exactly
+        # where it stalls — the "body read actual=…" line is the one that distinguishes a stalled
+        # request body (never printed) from a stall in storage or the response (printed, but no
+        # later line follows). Logging + timing only; no status codes or behaviour change.
+        start = time.monotonic()
         declared = request.headers.get("Content-Length")
         content_type = request.headers.get("Content-Type", "application/octet-stream")
         filename = request.headers.get("X-Filename", "")
+        client = request.client
+        client_addr = f"{client.host}:{client.port}" if client is not None else "unknown"
+        logger.info(
+            "upload: enter session=%s client=%s scheme=%s declared_len=%s content_type=%s "
+            "filename=%s",
+            session_id, client_addr, request.url.scheme, declared, content_type, filename,
+        )
         if declared is not None and int(declared) > context.max_upload_bytes:
             logger.warning(
                 "upload rejected as too large: session=%s filename=%s content_type=%s "
@@ -217,14 +231,31 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                  "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
                 status_code=413,
             )
+        logger.info("upload: reading body… (declared=%s)", declared)
+        read_start = time.monotonic()
         body = await request.body()
+        read_elapsed = time.monotonic() - read_start
+        logger.info("upload: body read actual=%d bytes in %.3fs", len(body), read_elapsed)
+        if declared is not None and int(declared) != len(body):
+            logger.warning(
+                "upload: length mismatch declared=%s actual=%d", declared, len(body),
+            )
         kind = _kind_for_upload(filename, content_type)
         try:
+            store_start = time.monotonic()
             artifact = _store_upload(context, session_id, body, kind, content_type)
+            logger.info(
+                "upload: stored artifact=%s kind=%s in %.3fs",
+                artifact.id, kind.value, time.monotonic() - store_start,
+            )
             # Build any index the file needs synchronously, while the request is still open
             # ([decisions.md 2026-07-23]): a G-code index is stored now; a .3mf is stored whole.
             if context.on_upload is not None:
+                on_upload_start = time.monotonic()
                 context.on_upload(artifact, body)
+                logger.info(
+                    "upload: on_upload done in %.3fs", time.monotonic() - on_upload_start,
+                )
         except Exception:
             logger.exception(
                 "upload failed: session=%s filename=%s content_type=%s size=%d",
@@ -234,12 +265,25 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                 {"error": "the upload could not be stored on the server"},
                 status_code=500,
             )
+        logger.info(
+            "upload: responding 200 artifact=%s total=%.3fs",
+            artifact.id, time.monotonic() - start,
+        )
         return JSONResponse({"artifact_id": artifact.id, "size": len(body), "kind": kind.value})
 
     @app.post("/sessions/{session_id}/audio")
     async def upload_audio(session_id: str, request: Request) -> Response:
+        # Lighter mirror of the /files instrumentation ([decisions.md 2026-07-23]): audio bodies
+        # are small and succeed today, so only enter / body-read / responding are logged.
+        start = time.monotonic()
         declared = request.headers.get("Content-Length")
         content_type = request.headers.get("Content-Type", "audio/webm")
+        client = request.client
+        client_addr = f"{client.host}:{client.port}" if client is not None else "unknown"
+        logger.info(
+            "upload: audio enter session=%s client=%s scheme=%s declared_len=%s content_type=%s",
+            session_id, client_addr, request.url.scheme, declared, content_type,
+        )
         if declared is not None and int(declared) > context.max_upload_bytes:
             logger.warning(
                 "audio upload rejected as too large: session=%s content_type=%s "
@@ -251,7 +295,13 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                  "limit_bytes": context.max_upload_bytes, "declared": int(declared)},
                 status_code=413,
             )
+        logger.info("upload: audio reading body… (declared=%s)", declared)
+        read_start = time.monotonic()
         body = await request.body()
+        logger.info(
+            "upload: audio body read actual=%d bytes in %.3fs",
+            len(body), time.monotonic() - read_start,
+        )
         # Transcribe with the bundled Whisper model when one is wired ([decisions.md 2026-07-23]);
         # the blocking CPU work runs off the event loop. A failure (or no transcriber) never fails
         # the upload — the clip is still stored, marked pending, so nothing is lost.
@@ -280,6 +330,10 @@ def _register_routes(app: FastAPI, context: AppContext) -> None:
                 {"error": "the audio clip could not be stored on the server"},
                 status_code=500,
             )
+        logger.info(
+            "upload: audio responding artifact=%s total=%.3fs",
+            artifact.id, time.monotonic() - start,
+        )
         # A successful transcript reaches the session as a user message so the agent answers it,
         # taking the same path the text composer uses ([web.md §7]).
         if transcript:
