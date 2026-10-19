@@ -30,7 +30,7 @@ huggingface-hub==1.24.0
 idna==3.18
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
-mcp==1.28.1
+mcp==1.30.0
 numpy==2.5.1
 onnxruntime==1.27.0
 packaging==26.2
